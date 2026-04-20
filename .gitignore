@@ -3,6 +3,7 @@ node_modules/
 dist/
 .DS_Store
 *.log
+*.mp3
 frontend/dist/
 backend/dist/
 .npm

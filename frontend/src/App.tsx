@@ -22,7 +22,7 @@ function App() {
   const [calls, setCalls] = useState<{id: number, number: string, time: string, duration: string, status: string}[]>(() => {
     const saved = localStorage.getItem('sip_history');
     return saved ? JSON.parse(saved) : [
-      { id: 1, number: '+54 11 5246-9291', time: '10:30 AM', duration: '2:15', status: 'Completada' },
+      { id: 1, number: '+54 11 5277-2021', time: '10:30 AM', duration: '2:15', status: 'Completada' },
     ];
   });
 

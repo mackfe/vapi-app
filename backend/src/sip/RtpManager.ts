@@ -1,5 +1,6 @@
 import dgram from 'dgram';
-import { ulawFromPCM, ulawToPCM } from 'g711';
+import * as g711 from 'g711';
+const { ulawFromPCM, ulawToPCM } = g711;
 import { EventEmitter } from 'events';
 
 export class RtpManager extends EventEmitter {
