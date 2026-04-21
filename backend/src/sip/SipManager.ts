@@ -36,23 +36,24 @@ export class SipManager {
     
     const options = {
       port: 5060,
-      hostname: '0.0.0.0',
+      hostname: '0.0.0.0', // Volvemos a bindeal a todo
     };
 
     try {
       this.sipStack.start(options, (request: any) => {
+        console.log(`[SIP] <--- Petición entrante: ${request.method} desde ${request.headers.from.uri}`);
         this.handleRequest(request);
       });
 
-      this.register();
+      console.log('[SIP] Servidor en modo ESCUCHA (Esperando INVITE directo)...');
     } catch (error) {
       console.error('[SIP] Error al iniciar stack:', error);
     }
   }
 
   private register() {
-    const localIp = getLocalIp();
-    const contact = { uri: `sip:${config.user}@${localIp}:5060` };
+    const publicIp = '200.8.121.19';
+    const contact = { uri: `sip:${config.user}@${publicIp}:5060` };
     
     const request = {
       method: 'REGISTER',
@@ -64,10 +65,13 @@ export class SipManager {
         cseq: { method: 'REGISTER', seq: Math.floor(Math.random() * 1000) },
         contact: [contact],
         'max-forwards': 70,
+        expires: 60, // Registro corto para forzar tráfico
       },
     };
 
+    console.log(`[SIP] Reintento de registro con IP Pública y Expiración corta...`);
     this.sipStack.send(request, (response: any) => {
+      console.log(`[SIP] Respuesta recibida: ${response.status} ${response.reason}`);
       if (response.status === 200) {
         this.isRegistered = true;
         console.log('[SIP] Registro EXITOSO.');
@@ -105,10 +109,14 @@ export class SipManager {
   }
 
   private handleRequest(request: any) {
+    console.log(`[SIP] <--- Petición entrante: ${request.method} desde ${request.headers.from.uri}`);
     if (request.method === 'INVITE') {
       this.handleInvite(request);
     } else if (request.method === 'BYE') {
       this.handleBye(request);
+    } else if (request.method === 'OPTIONS') {
+      console.log('[SIP] Respondiendo a OPTIONS (Keep-alive)');
+      this.sipStack.send(this.sipStack.makeResponse(request, 200, 'OK'));
     }
   }
 
@@ -121,11 +129,12 @@ export class SipManager {
     this.rtp = new RtpManager();
     await this.rtp.start();
 
+    const publicIp = '200.8.121.19';
     const sdp = [
       'v=0',
-      `o=- ${Date.now()} ${Date.now()} IN IP4 ${localIp}`,
+      `o=- ${Date.now()} ${Date.now()} IN IP4 ${publicIp}`,
       's=-',
-      `c=IN IP4 ${localIp}`,
+      `c=IN IP4 ${publicIp}`,
       't=0 0',
       `m=audio ${this.rtp.getPort()} RTP/AVP 0`,
       'a=rtpmap:0 PCMU/8000',
@@ -133,7 +142,7 @@ export class SipManager {
     ].join('\r\n') + '\r\n';
 
     const response = this.sipStack.makeResponse(request, 200, 'OK');
-    response.headers.contact = [{ uri: `sip:${config.user}@${localIp}:5060` }];
+    response.headers.contact = [{ uri: `sip:${config.user}@${publicIp}:5060` }];
     response.headers['content-type'] = 'application/sdp';
     response.content = sdp;
 
@@ -149,45 +158,88 @@ export class SipManager {
     // Estado para manejo de voz
     let audioBuffer = Buffer.alloc(0);
     let silenceTimer: NodeJS.Timeout | null = null;
+    let isAiSpeaking = false; // Flag para evitar que la IA se escuche a sí misma
+
+    // Umbral de energía para detección de voz (VAD)
+    // 0.01 es un valor sensible pero evita ruido de fondo leve
+    const ENERGY_THRESHOLD = 0.02; 
+
+    const calculateEnergy = (pcmChunk: Buffer) => {
+      let sum = 0;
+      const int16Array = new Int16Array(pcmChunk.buffer, pcmChunk.byteOffset, pcmChunk.byteLength / 2);
+      for (let i = 0; i < int16Array.length; i++) {
+        const sample = int16Array[i] / 32768; // Normalizar a [-1, 1]
+        sum += sample * sample;
+      }
+      return Math.sqrt(sum / int16Array.length);
+    };
 
     this.rtp.on('audio', async (data) => {
-      // Emitir audio al dashboard para monitoreo (en chunks pequeños)
+      // Ignorar entrada si la IA está hablando o el sistema está en silencio
+      if (isAiSpeaking) return;
+
+      const energy = calculateEnergy(data);
+      
+      // Emitir audio al dashboard para monitoreo
       if (this.io) this.io.emit('audio-chunk', data);
       
-      audioBuffer = Buffer.concat([audioBuffer, data]);
-      
-      if (silenceTimer) clearTimeout(silenceTimer);
-      
-      silenceTimer = setTimeout(async () => {
-        if (audioBuffer.length > 8000) {
-          const currentBuffer = audioBuffer;
-          audioBuffer = Buffer.alloc(0);
-          
-          const text = await this.ai.getTranscription(currentBuffer);
-          
-          if (text && text.trim().length > 1) {
-            if (this.io) this.io.emit('transcription', `Vecino: ${text}`);
+      // Solo acumular si hay suficiente energía (voz detectada)
+      if (energy > ENERGY_THRESHOLD) {
+        audioBuffer = Buffer.concat([audioBuffer, data]);
+        
+        if (silenceTimer) clearTimeout(silenceTimer);
+        
+        silenceTimer = setTimeout(async () => {
+          // Si tenemos al menos 0.5 seg de audio (8000 bytes = 0.5s en 8kHz/16bit)
+          if (audioBuffer.length > 4000) {
+            const currentBuffer = audioBuffer;
+            audioBuffer = Buffer.alloc(0);
             
-            const response = await this.ai.getAiResponse(text);
-            if (this.io) this.io.emit('transcription', `IA: ${response}`);
+            console.log(`[VAD] Voz detectada. Procesando ${currentBuffer.length} bytes...`);
+            const text = await this.ai.getTranscription(currentBuffer);
             
-            const audioResponse = await this.tts.textToSpeech(response);
-            
-            // Emitir respuesta de la IA al dashboard para monitoreo
-            if (this.io) this.io.emit('audio-chunk', audioResponse);
-            
-            if (this.rtp) this.rtp.sendAudio(audioResponse);
+            if (text && text.trim().length > 1) {
+              isAiSpeaking = true; // Bloquear escucha
+              console.log(`[AI] Usuario dijo: "${text}"`);
+              if (this.io) this.io.emit('transcription', `Vecino: ${text}`);
+              
+              const response = await this.ai.getAiResponse(text);
+              console.log(`[AI] Respuesta: "${response}"`);
+              if (this.io) this.io.emit('transcription', `IA: ${response}`);
+              
+              const audioResponse = await this.tts.textToSpeech(response);
+              
+              if (this.io) this.io.emit('audio-chunk', audioResponse);
+              
+              if (this.rtp) {
+                this.rtp.sendAudio(audioResponse);
+                // Estimar tiempo de reproducción (muy rudo: 8kb por segundo aprox)
+                const playDuration = (audioResponse.length / 8000) * 1000 + 500;
+                setTimeout(() => {
+                  isAiSpeaking = false; // Liberar escucha tras terminar de hablar
+                  console.log("[AI] Fin de respuesta. Escuchando de nuevo...");
+                }, playDuration);
+              }
+            }
+          } else {
+             // Si el audio acumulado era muy corto, probablemente fue ruido, limpiar.
+             audioBuffer = Buffer.alloc(0);
           }
-        }
-      }, 1500);
+        }, 1000); // 1 segundo de silencio para considerar fin de frase
+      }
     });
 
     // Mensaje de bienvenida inicial
     setTimeout(async () => {
       const welcome = "Hola, bienvenido a la línea de atención del Municipio de 3 de Febrero. ¿En qué puedo ayudarte con el tema de podas o árboles?";
       if (this.io) this.io.emit('transcription', `IA: ${welcome}`);
+      isAiSpeaking = true;
       const audio = await this.tts.textToSpeech(welcome);
-      if (this.rtp) this.rtp.sendAudio(audio);
+      if (this.rtp) {
+        this.rtp.sendAudio(audio);
+        const playDuration = (audio.length / 8000) * 1000 + 500;
+        setTimeout(() => { isAiSpeaking = false; }, playDuration);
+      }
     }, 1500);
   }
 
