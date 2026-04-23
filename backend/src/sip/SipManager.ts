@@ -178,7 +178,7 @@ export class SipManager {
       let sum = 0;
       const int16Array = new Int16Array(pcmChunk.buffer, pcmChunk.byteOffset, pcmChunk.byteLength / 2);
       for (let i = 0; i < int16Array.length; i++) {
-        const sample = int16Array[i] / 32768; // Normalizar a [-1, 1]
+        const sample = int16Array[i]! / 32768; // Normalizar a [-1, 1]
         sum += sample * sample;
       }
       return Math.sqrt(sum / int16Array.length);

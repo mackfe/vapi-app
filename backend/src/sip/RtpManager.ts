@@ -1,5 +1,5 @@
 import dgram from 'dgram';
-const g711 = require('g711');
+import g711 from 'g711';
 const { ulawFromPCM, ulawToPCM } = g711;
 import { EventEmitter } from 'events';
 
