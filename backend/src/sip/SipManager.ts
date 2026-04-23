@@ -52,7 +52,7 @@ export class SipManager {
   }
 
   private register() {
-    const publicIp = '200.8.121.19';
+    const publicIp = '212.56.33.91';
     const contact = { uri: `sip:${config.user}@${publicIp}:5060` };
     
     const request = {
@@ -125,11 +125,21 @@ export class SipManager {
     this.sipStack.send(this.sipStack.makeResponse(request, 180, 'Ringing'));
     
     // Configurar RTP
-    const localIp = getLocalIp();
     this.rtp = new RtpManager();
     await this.rtp.start();
 
-    const publicIp = '200.8.121.19';
+    // Extraer IP y Puerto remoto del SDP del INVITE
+    const remoteSdp = request.content || '';
+    const ipMatch = remoteSdp.match(/c=IN IP4 ([0-9.]+)/);
+    const portMatch = remoteSdp.match(/m=audio ([0-9]+)/);
+    
+    if (ipMatch && portMatch) {
+      this.rtp.setRemote(ipMatch[1], parseInt(portMatch[2]));
+    } else {
+      console.warn('[SIP] No se pudo extraer IP/Puerto del SDP remoto');
+    }
+
+    const publicIp = '212.56.33.91';
     const sdp = [
       'v=0',
       `o=- ${Date.now()} ${Date.now()} IN IP4 ${publicIp}`,

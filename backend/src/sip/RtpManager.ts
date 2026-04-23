@@ -15,6 +15,12 @@ export class RtpManager extends EventEmitter {
     this.server = dgram.createSocket('udp4');
   }
 
+  public setRemote(address: string, port: number) {
+    this.remoteAddress = address;
+    this.remotePort = port;
+    console.log(`[RTP] Destino remoto configurado manualmente: ${this.remoteAddress}:${this.remotePort}`);
+  }
+
   public async start() {
     return new Promise<void>((resolve, reject) => {
       this.server.on('error', (err) => {
