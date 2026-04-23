@@ -151,6 +151,10 @@ export class SipManager {
       'a=sendrecv',
     ].join('\r\n') + '\r\n';
 
+    console.log(`\n================ SDP ENVIADO A DAINUS ================`);
+    console.log(sdp);
+    console.log(`======================================================\n`);
+
     const response = this.sipStack.makeResponse(request, 200, 'OK');
     response.headers.contact = [{ uri: `sip:${config.user}@${publicIp}:5060` }];
     response.headers['content-type'] = 'application/sdp';
