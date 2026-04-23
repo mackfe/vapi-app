@@ -134,7 +134,7 @@ export class SipManager {
     const portMatch = remoteSdp.match(/m=audio ([0-9]+)/);
     
     if (ipMatch && portMatch) {
-      this.rtp.setRemote(ipMatch[1], parseInt(portMatch[2]));
+      this.rtp.setRemote(ipMatch[1], parseInt(portMatch[1], 10));
     } else {
       console.warn('[SIP] No se pudo extraer IP/Puerto del SDP remoto');
     }
