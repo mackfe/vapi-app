@@ -52,7 +52,7 @@ export class SipManager {
   }
 
   private register() {
-    const publicIp = '212.56.33.91';
+    const publicIp = process.env.PUBLIC_IP || '200.8.121.19';
     const contact = { uri: `sip:${config.user}@${publicIp}:5060` };
     
     const request = {
@@ -139,7 +139,7 @@ export class SipManager {
       console.warn('[SIP] No se pudo extraer IP/Puerto del SDP remoto');
     }
 
-    const publicIp = '212.56.33.91';
+    const publicIp = process.env.PUBLIC_IP || '200.8.121.19';
     const sdp = [
       'v=0',
       `o=- ${Date.now()} ${Date.now()} IN IP4 ${publicIp}`,
