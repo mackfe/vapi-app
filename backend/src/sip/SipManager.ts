@@ -139,7 +139,12 @@ export class SipManager {
       console.warn('[SIP] No se pudo extraer IP/Puerto del SDP remoto');
     }
 
-    const publicIp = process.env.PUBLIC_IP || '200.8.121.19';
+    let publicIp = process.env.PUBLIC_IP || '212.56.33.91';
+    if (JSON.stringify(request).includes('192.168.')) {
+      console.log('[SIP] Detectada red local. Usando IP interna 192.168.1.114 para el audio.');
+      publicIp = '192.168.1.114';
+    }
+
     const sdp = [
       'v=0',
       `o=- ${Date.now()} ${Date.now()} IN IP4 ${publicIp}`,
