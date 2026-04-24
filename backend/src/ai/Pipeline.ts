@@ -22,6 +22,9 @@ export class AiPipeline {
           model: 'nova-2',
           smart_format: true,
           language: 'es-419',
+          encoding: 'linear16',
+          sample_rate: 8000,
+          channels: 1
         }
       );
 
