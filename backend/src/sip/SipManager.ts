@@ -124,6 +124,12 @@ export class SipManager {
     console.log('[SIP] ¡Llamada entrante detectada!');
     this.sipStack.send(this.sipStack.makeResponse(request, 180, 'Ringing'));
     
+    // Limpiar puerto de la llamada anterior si quedó abierto
+    if (this.rtp) {
+      console.log('[RTP] Limpiando puerto de la llamada anterior...');
+      this.rtp.stop();
+    }
+
     // Configurar RTP
     this.rtp = new RtpManager();
     await this.rtp.start();

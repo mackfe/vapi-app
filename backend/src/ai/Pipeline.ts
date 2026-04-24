@@ -1,4 +1,4 @@
-import { DeepgramClient } from '@deepgram/sdk';
+import { createClient } from '@deepgram/sdk';
 import Groq from 'groq-sdk';
 import * as dotenv from 'dotenv';
 import { MUNICIPAL_KNOWLEDGE } from './knowledge.js';
@@ -6,17 +6,17 @@ import { MUNICIPAL_KNOWLEDGE } from './knowledge.js';
 dotenv.config();
 
 export class AiPipeline {
-  private deepgram: DeepgramClient;
+  private deepgram: any;
   private groq: Groq;
 
   constructor() {
-    this.deepgram = new DeepgramClient();
+    this.deepgram = createClient(process.env.DEEPGRAM_API_KEY);
     this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
   }
 
   public async getTranscription(audioBuffer: Buffer) {
     try {
-      const { result, error } = await (this.deepgram.listen as any).prerecorded.transcribeFile(
+      const { result, error } = await this.deepgram.listen.prerecorded.transcribeFile(
         audioBuffer,
         {
           model: 'nova-2',
