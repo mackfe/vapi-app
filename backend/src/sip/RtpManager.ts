@@ -53,18 +53,46 @@ export class RtpManager extends EventEmitter {
   public sendAudio(pcmBuffer: Buffer) {
     if (!this.remoteAddress || !this.remotePort) return;
 
-    // Codificar PCM a G.711 u-law
+    // Codificar todo el PCM a G.711 u-law
     const encoded = Buffer.from(ulawFromPCM(new Int16Array(pcmBuffer.buffer)));
     
-    // Crear cabecera RTP básica (12 bytes)
-    // Para simplificar, usamos valores fijos o incrementales mínimos
-    const rtpHeader = Buffer.alloc(12);
-    rtpHeader[0] = 0x80; // V=2, P=0, X=0, CC=0
-    rtpHeader[1] = 0x00; // M=0, PT=0 (PCMU)
-    // ... aquí irían Sequence Number y Timestamp reales ...
+    // Configuración estándar de VoIP: 20ms por paquete (160 bytes a 8000Hz)
+    const PAYLOAD_SIZE = 160; 
+    let offset = 0;
+    
+    // El protocolo RTP requiere secuencias y timestamps válidos
+    let sequenceNumber = Math.floor(Math.random() * 65535);
+    let timestamp = Math.floor(Math.random() * 4294967295);
+    const ssrc = 0x12345678;
 
-    const packet = Buffer.concat([rtpHeader, encoded]);
-    this.server.send(packet, this.remotePort, this.remoteAddress);
+    // Enviar los paquetes de a poco (Streaming)
+    const interval = setInterval(() => {
+      if (offset >= encoded.length) {
+        clearInterval(interval);
+        return;
+      }
+
+      // Tomar un fragmento de 160 bytes
+      const end = Math.min(offset + PAYLOAD_SIZE, encoded.length);
+      const chunk = encoded.slice(offset, end);
+      
+      // Crear cabecera RTP de 12 bytes
+      const rtpHeader = Buffer.alloc(12);
+      rtpHeader[0] = 0x80; // V=2
+      rtpHeader[1] = 0x00; // PT=0 (PCMU)
+      rtpHeader.writeUInt16BE(sequenceNumber, 2);
+      rtpHeader.writeUInt32BE(timestamp, 4);
+      rtpHeader.writeUInt32BE(ssrc, 8);
+
+      // Unir cabecera con el audio y enviar
+      const packet = Buffer.concat([rtpHeader, chunk]);
+      this.server.send(packet, this.remotePort!, this.remoteAddress!);
+
+      // Actualizar contadores para el siguiente paquete
+      offset += PAYLOAD_SIZE;
+      sequenceNumber = (sequenceNumber + 1) % 65536;
+      timestamp += PAYLOAD_SIZE; 
+    }, 20);
   }
 
   public getPort() {
