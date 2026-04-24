@@ -1,4 +1,4 @@
-import { createClient } from '@deepgram/sdk';
+import { DeepgramClient } from '@deepgram/sdk';
 import Groq from 'groq-sdk';
 import * as dotenv from 'dotenv';
 import { MUNICIPAL_KNOWLEDGE } from './knowledge.js';
@@ -6,17 +6,17 @@ import { MUNICIPAL_KNOWLEDGE } from './knowledge.js';
 dotenv.config();
 
 export class AiPipeline {
-  private deepgram: any;
+  private deepgram: DeepgramClient;
   private groq: Groq;
 
   constructor() {
-    this.deepgram = createClient(process.env.DEEPGRAM_API_KEY);
+    this.deepgram = new DeepgramClient({ apiKey: process.env.DEEPGRAM_API_KEY || '' });
     this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
   }
 
   public async getTranscription(audioBuffer: Buffer) {
     try {
-      const { result, error } = await this.deepgram.listen.prerecorded.transcribeFile(
+      const { result, error } = await this.deepgram.listen.v1.media.transcribeFile(
         audioBuffer,
         {
           model: 'nova-2',
@@ -29,7 +29,7 @@ export class AiPipeline {
       );
 
       if (error) throw error;
-      return result.results.channels[0].alternatives[0].transcript;
+      return result?.results?.channels[0]?.alternatives[0]?.transcript || "";
     } catch (err) {
       console.error('[Deepgram] Error de transcripción:', err);
       return "";
