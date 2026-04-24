@@ -1,5 +1,4 @@
-import pkg from '@deepgram/sdk';
-const { createClient } = pkg;
+import { createClient } from '@deepgram/sdk';
 import Groq from 'groq-sdk';
 import * as dotenv from 'dotenv';
 import { MUNICIPAL_KNOWLEDGE } from './knowledge.js';
