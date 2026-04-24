@@ -72,6 +72,10 @@ export class RtpManager extends EventEmitter {
   }
 
   public stop() {
-    this.server.close();
+    try {
+      this.server.close();
+    } catch (e) {
+      // Ignorar si el socket ya estaba cerrado
+    }
   }
 }
