@@ -187,7 +187,7 @@ export class SipManager {
 
     // Umbral de energía para detección de voz (VAD)
     // 0.01 es un valor sensible pero evita ruido de fondo leve
-    const ENERGY_THRESHOLD = 0.02; 
+    const ENERGY_THRESHOLD = 0.005; 
 
     const calculateEnergy = (pcmChunk: Buffer) => {
       let sum = 0;
@@ -239,7 +239,7 @@ export class SipManager {
               if (this.rtp) {
                 this.rtp.sendAudio(audioResponse);
                 // Estimar tiempo de reproducción (muy rudo: 8kb por segundo aprox)
-                const playDuration = (audioResponse.length / 8000) * 1000 + 500;
+                const playDuration = (audioResponse.length / 16000) * 1000 + 500;
                 setTimeout(() => {
                   isAiSpeaking = false; // Liberar escucha tras terminar de hablar
                   console.log("[AI] Fin de respuesta. Escuchando de nuevo...");
@@ -262,7 +262,7 @@ export class SipManager {
       const audio = await this.tts.textToSpeech(welcome);
       if (this.rtp) {
         this.rtp.sendAudio(audio);
-        const playDuration = (audio.length / 8000) * 1000 + 500;
+        const playDuration = (audio.length / 16000) * 1000 + 500;
         setTimeout(() => { isAiSpeaking = false; }, playDuration);
       }
     }, 1500);

@@ -1,4 +1,4 @@
-import { DeepgramClient } from '@deepgram/sdk';
+import axios from 'axios';
 import Groq from 'groq-sdk';
 import * as dotenv from 'dotenv';
 import { MUNICIPAL_KNOWLEDGE } from './knowledge.js';
@@ -6,11 +6,9 @@ import { MUNICIPAL_KNOWLEDGE } from './knowledge.js';
 dotenv.config();
 
 export class AiPipeline {
-  private deepgram: DeepgramClient;
   private groq: Groq;
 
   constructor() {
-    this.deepgram = new DeepgramClient({ apiKey: process.env.DEEPGRAM_API_KEY || '' });
     this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
   }
 
@@ -34,23 +32,23 @@ export class AiPipeline {
 
   public async getTranscription(audioBuffer: Buffer) {
     try {
-      // Empacar el audio crudo en un archivo WAV válido al vuelo
       const wavHeader = this.createWavHeader(audioBuffer.length);
       const wavBuffer = Buffer.concat([wavHeader, audioBuffer]);
 
-      const { result, error } = await this.deepgram.listen.v1.media.transcribeFile(
+      const response = await axios.post(
+        'https://api.deepgram.com/v1/listen?model=nova-2&language=es-419&smart_format=true',
         wavBuffer,
         {
-          model: 'nova-2',
-          smart_format: true,
-          language: 'es-419'
+          headers: {
+            'Authorization': `Token ${process.env.DEEPGRAM_API_KEY}`,
+            'Content-Type': 'audio/wav'
+          }
         }
       );
 
-      if (error) throw error;
-      return result?.results?.channels[0]?.alternatives[0]?.transcript || "";
-    } catch (err) {
-      console.error('[Deepgram] Error de transcripción:', err);
+      return response.data?.results?.channels[0]?.alternatives[0]?.transcript || "";
+    } catch (err: any) {
+      console.error('[Deepgram] Error de transcripción:', err.response?.data || err.message);
       return "";
     }
   }
