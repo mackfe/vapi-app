@@ -247,14 +247,15 @@ export class SipManager {
               
               if (this.io) this.io.emit('audio-chunk', audioResponse);
               
-              if (this.rtp) {
+              if (this.rtp && audioResponse.length > 0) {
                 this.rtp.sendAudio(audioResponse);
-                // Estimar tiempo de reproducción (muy rudo: 8kb por segundo aprox)
                 const playDuration = (audioResponse.length / 16000) * 1000 + 500;
                 setTimeout(() => {
-                  isAiSpeaking = false; // Liberar escucha tras terminar de hablar
+                  isAiSpeaking = false;
                   console.log("[AI] Fin de respuesta. Escuchando de nuevo...");
                 }, playDuration);
+              } else {
+                isAiSpeaking = false; // Si falló el audio, liberar mic inmediatamente
               }
             }
           } else {
@@ -271,7 +272,7 @@ export class SipManager {
       if (this.io) this.io.emit('transcription', `IA: ${welcome}`);
       isAiSpeaking = true;
       const audio = await this.tts.textToSpeech(welcome);
-      if (this.rtp) {
+      if (this.rtp && audio.length > 0) {
         this.rtp.sendAudio(audio);
         const playDuration = (audio.length / 16000) * 1000 + 500;
         
@@ -279,6 +280,8 @@ export class SipManager {
         await this.db.saveTranscript(this.callId, 'ai', welcome);
         
         setTimeout(() => { isAiSpeaking = false; }, playDuration);
+      } else {
+        isAiSpeaking = false; // Si falló el audio inicial, permitir que el usuario hable
       }
     }, 1500);
   }

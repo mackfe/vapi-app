@@ -21,7 +21,7 @@ export class FishAudioClient {
       const response = await axios.post(
         'https://api.fish.audio/v1/tts',
         {
-          text: text,
+          text,
           reference_id: this.referenceId,
           format: 'mp3',
           latency: 'balanced',
@@ -36,32 +36,38 @@ export class FishAudioClient {
       );
 
       const mp3Buffer = Buffer.from(response.data);
-      
-      return new Promise((resolve, reject) => {
-        const pcmChunks: Buffer[] = [];
-        const inputStream = new Readable();
-        inputStream.push(mp3Buffer);
-        inputStream.push(null);
-
-        ffmpeg(inputStream)
-          .inputFormat('mp3')
-          .audioCodec('pcm_s16le')
-          .audioFrequency(8000)
-          .audioChannels(1)
-          .format('s16le')
-          .on('error', (err) => {
-            console.error('[FFmpeg] Error transcodificando audio:', err);
-            reject(err);
-          })
-          .on('end', () => {
-            resolve(Buffer.concat(pcmChunks));
-          })
-          .pipe()
-          .on('data', (chunk: Buffer) => pcmChunks.push(chunk));
-      });
-    } catch (error) {
-      console.error('[FishAudio] Error en TTS:', error);
-      throw error;
+      return await this.convertMp3ToPcm(mp3Buffer);
+    } catch (error: any) {
+      console.error('[FishAudio] ERROR CRÍTICO:', error.response?.data?.toString() || error.message);
+      // Retornar buffer vacío en lugar de lanzar error para no tumbar el servidor
+      return Buffer.alloc(0);
     }
+  }
+
+  private convertMp3ToPcm(mp3Buffer: Buffer): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const pcmChunks: Buffer[] = [];
+      const inputStream = new Readable();
+      inputStream.push(mp3Buffer);
+      inputStream.push(null);
+
+      ffmpeg(inputStream)
+        .inputFormat('mp3')
+        .audioCodec('pcm_s16le')
+        .audioFrequency(8000)
+        .audioChannels(1)
+        .format('s16le')
+        .on('error', (err) => {
+          console.error('[FFmpeg] Error transcodificando audio:', err);
+          resolve(Buffer.alloc(0)); // Retornar vacío en error
+        })
+        .on('end', () => {
+          resolve(Buffer.concat(pcmChunks));
+        })
+        .pipe()
+        .on('data', (chunk: Buffer) => {
+          pcmChunks.push(chunk);
+        });
+    });
   }
 }
