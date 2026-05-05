@@ -6,6 +6,7 @@ import { RtpManager } from './RtpManager.js';
 import { getLocalIp } from '../utils/network.js';
 import { AiPipeline } from '../ai/Pipeline.js';
 import { FishAudioClient } from '../ai/FishAudioClient.js';
+import { DbManager } from '../database/DbManager.js';
 
 dotenv.config();
 
@@ -22,12 +23,15 @@ export class SipManager {
   private rtp: RtpManager | null = null;
   private ai: AiPipeline;
   private tts: FishAudioClient;
+  private db: DbManager;
   private io: any;
 
   constructor(io?: any) {
     this.sipStack = sip;
     this.ai = new AiPipeline();
     this.tts = new FishAudioClient();
+    this.db = new DbManager();
+    this.db.init();
     this.io = io;
   }
 
@@ -179,6 +183,9 @@ export class SipManager {
     
     console.log(`[SIP] Llamada aceptada de: ${callerId}`);
     if (this.io) this.io.emit('call-started', { callerId });
+    
+    // Registrar llamada en DB
+    await this.db.createCall(this.callId, callerId);
 
     // Estado para manejo de voz
     let audioBuffer = Buffer.alloc(0);
@@ -232,6 +239,10 @@ export class SipManager {
               console.log(`[AI] Respuesta: "${response}"`);
               if (this.io) this.io.emit('transcription', `IA: ${response}`);
               
+              // Guardar transcripciones en DB
+              await this.db.saveTranscript(this.callId, 'user', text);
+              await this.db.saveTranscript(this.callId, 'ai', response);
+              
               const audioResponse = await this.tts.textToSpeech(response);
               
               if (this.io) this.io.emit('audio-chunk', audioResponse);
@@ -263,14 +274,25 @@ export class SipManager {
       if (this.rtp) {
         this.rtp.sendAudio(audio);
         const playDuration = (audio.length / 16000) * 1000 + 500;
+        
+        // Guardar bienvenida en DB
+        await this.db.saveTranscript(this.callId, 'ai', welcome);
+        
         setTimeout(() => { isAiSpeaking = false; }, playDuration);
       }
     }, 1500);
   }
 
-  private handleBye(request: any) {
+  private async handleBye(request: any) {
     console.log('[SIP] Llamada terminada.');
     this.sipStack.send(this.sipStack.makeResponse(request, 200, 'OK'));
+    
+    // Registrar fin de llamada en DB
+    await this.db.endCall(this.callId);
+    
+    // Generar nuevo Call ID para la siguiente llamada
+    this.callId = uuidv4();
+    
     if (this.rtp) this.rtp.stop();
     if (this.io) this.io.emit('call-ended');
   }
