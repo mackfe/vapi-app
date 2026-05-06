@@ -191,115 +191,123 @@ export class SipManager {
     // Registrar llamada en DB
     await this.db.createCall(this.callId, callerId);
 
-    // Estado para manejo de voz
+    // Estado para manejo de voz y costos
     let audioBuffer = Buffer.alloc(0);
     let silenceTimer: NodeJS.Timeout | null = null;
-    let isAiSpeaking = false; // Flag para evitar que la IA se escuche a sí misma
+    let isAiSpeaking = false;
+    let totalCallCost = 0;
 
-    // Umbral de energía para detección de voz (VAD)
-    // 0.01 es un valor sensible pero evita ruido de fondo leve
-    const ENERGY_THRESHOLD = 0.005; 
+    // Precios de referencia
+    const PRICES = {
+      STT_PER_MIN: 0.0044, // Deepgram
+      LLM_PER_1M_TOKENS: 0.60, // Groq
+      TTS_PER_1M_CHARS: 5.00 // FishAudio
+    };
 
     const calculateEnergy = (pcmChunk: Buffer) => {
       let sum = 0;
       const int16Array = new Int16Array(pcmChunk.buffer, pcmChunk.byteOffset, pcmChunk.byteLength / 2);
       for (let i = 0; i < int16Array.length; i++) {
-        const sample = int16Array[i]! / 32768; // Normalizar a [-1, 1]
+        const sample = int16Array[i]! / 32768;
         sum += sample * sample;
       }
       return Math.sqrt(sum / int16Array.length);
     };
 
     this.rtp.on('audio', async (data) => {
-      // Ignorar entrada si la IA está hablando o el sistema está en silencio
       if (isAiSpeaking) return;
-
       const energy = calculateEnergy(data);
-      
-      // Emitir audio al dashboard para monitoreo
       if (this.io) this.io.emit('audio-chunk', data);
       
-      // Solo acumular si hay suficiente energía (voz detectada)
-      if (energy > ENERGY_THRESHOLD) {
+      if (energy > 0.005) {
         audioBuffer = Buffer.concat([audioBuffer, data]);
-        
         if (silenceTimer) clearTimeout(silenceTimer);
         
         silenceTimer = setTimeout(async () => {
-          // Si tenemos al menos 0.5 seg de audio (8000 bytes = 0.5s en 8kHz/16bit)
           if (audioBuffer.length > 4000) {
             const currentBuffer = audioBuffer;
             audioBuffer = Buffer.alloc(0);
             
-            console.log(`[VAD] Voz detectada. Procesando ${currentBuffer.length} bytes...`);
+            // 1. Costo STT (Deepgram)
+            const durationSec = currentBuffer.length / 16000;
+            const costStt = (durationSec / 60) * PRICES.STT_PER_MIN;
+            totalCallCost += costStt;
+
             const text = await this.ai.getTranscription(currentBuffer);
-            
             if (text && text.trim().length > 1) {
-              isAiSpeaking = true; // Bloquear escucha
-              console.log(`[AI] Usuario dijo: "${text}"`);
+              isAiSpeaking = true;
               if (this.io) this.io.emit('transcription', `Vecino: ${text}`);
               
               const response = await this.ai.getAiResponse(text);
-              console.log(`[AI] Respuesta: "${response}"`);
+              
+              // 2. Costo LLM (Groq) - Estimación tokens: palabras * 1.3
+              const tokens = response.split(' ').length * 1.3;
+              const costLlm = (tokens / 1000000) * PRICES.LLM_PER_1M_TOKENS;
+              totalCallCost += costLlm;
+
               if (this.io) this.io.emit('transcription', `IA: ${response}`);
               
-              // Guardar transcripciones en DB
               await this.db.saveTranscript(this.callId, 'user', text);
               await this.db.saveTranscript(this.callId, 'ai', response);
               
+              // 3. Costo TTS (FishAudio)
+              const costTts = (response.length / 1000000) * PRICES.TTS_PER_1M_CHARS;
+              totalCallCost += costTts;
+
               const audioResponse = await this.tts.textToSpeech(response);
-              
               if (this.io) this.io.emit('audio-chunk', audioResponse);
               
               if (this.rtp && audioResponse.length > 0) {
                 this.rtp.sendAudio(audioResponse);
                 const playDuration = (audioResponse.length / 16000) * 1000 + 500;
-                setTimeout(() => {
-                  isAiSpeaking = false;
-                  console.log("[AI] Fin de respuesta. Escuchando de nuevo...");
-                }, playDuration);
+                setTimeout(() => { isAiSpeaking = false; }, playDuration);
               } else {
-                isAiSpeaking = false; // Si falló el audio, liberar mic inmediatamente
+                isAiSpeaking = false;
               }
+              
+              console.log(`[COST] Costo acumulado de la llamada: $${totalCallCost.toFixed(6)}`);
             }
           } else {
-             // Si el audio acumulado era muy corto, probablemente fue ruido, limpiar.
              audioBuffer = Buffer.alloc(0);
           }
-        }, 1000); // 1 segundo de silencio para considerar fin de frase
+        }, 1000);
       }
     });
 
-    // Mensaje de bienvenida inicial
+    // Bienvenida
     setTimeout(async () => {
-      const welcome = "Hola, bienvenido a la línea de atención del Municipio de 3 de Febrero. ¿En qué puedo ayudarte con el tema de podas o árboles?";
+      const welcome = "Hola, bienvenido a la línea de atención del Municipio de 3 de Febrero. ¿En qué puedo ayudarte?";
       if (this.io) this.io.emit('transcription', `IA: ${welcome}`);
       isAiSpeaking = true;
+      
+      // Costo Bienvenida (Solo TTS)
+      totalCallCost += (welcome.length / 1000000) * PRICES.TTS_PER_1M_CHARS;
+
       const audio = await this.tts.textToSpeech(welcome);
       if (this.rtp && audio.length > 0) {
         this.rtp.sendAudio(audio);
-        const playDuration = (audio.length / 16000) * 1000 + 500;
-        
-        // Guardar bienvenida en DB
         await this.db.saveTranscript(this.callId, 'ai', welcome);
-        
-        setTimeout(() => { isAiSpeaking = false; }, playDuration);
+        setTimeout(() => { isAiSpeaking = false; }, (audio.length / 16000) * 1000 + 500);
       } else {
-        isAiSpeaking = false; // Si falló el audio inicial, permitir que el usuario hable
+        isAiSpeaking = false;
       }
     }, 1500);
+
+    // Guardamos la referencia de costo en la instancia para usarla en handleBye
+    (this as any).currentCallCost = () => totalCallCost;
   }
 
   private async handleBye(request: any) {
     console.log('[SIP] Llamada terminada.');
     this.sipStack.send(this.sipStack.makeResponse(request, 200, 'OK'));
     
-    // Registrar fin de llamada en DB
-    await this.db.endCall(this.callId);
+    // Recuperar costo acumulado
+    const finalCost = (this as any).currentCallCost ? (this as any).currentCallCost() : 0;
+
+    // Registrar fin de llamada con costo
+    await this.db.endCall(this.callId, finalCost);
     
-    // Generar nuevo Call ID para la siguiente llamada
     this.callId = uuidv4();
-    
     if (this.rtp) this.rtp.stop();
     if (this.io) this.io.emit('call-ended');
   }

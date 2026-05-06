@@ -12,6 +12,7 @@ interface Call {
   started_at: string;
   ended_at: string | null;
   status: string;
+  cost: number;
 }
 
 interface Transcript {
@@ -304,6 +305,11 @@ function App() {
                             <div className={`px-2 py-0.5 rounded ${call.status === 'ongoing' ? 'bg-red-500/20 text-red-400' : 'bg-white/10 text-white/40'}`}>
                               {call.status === 'ongoing' ? 'En Vivo' : 'Finalizada'}
                             </div>
+                            {call.cost > 0 && (
+                              <div className="bg-emerald-500/10 text-emerald-500/80 px-2 py-0.5 rounded border border-emerald-500/10">
+                                ${Number(call.cost).toFixed(4)}
+                              </div>
+                            )}
                           </div>
                        </motion.div>
                      ))

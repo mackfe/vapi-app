@@ -33,9 +33,13 @@ export class DbManager {
           caller_id VARCHAR(50),
           started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           ended_at TIMESTAMP,
-          status VARCHAR(20) DEFAULT 'ongoing'
+          status VARCHAR(20) DEFAULT 'ongoing',
+          cost DECIMAL(10, 6) DEFAULT 0
         );
       `);
+
+      // Asegurar que la columna cost existe (para migraciones)
+      await this.pool.query('ALTER TABLE calls ADD COLUMN IF NOT EXISTS cost DECIMAL(10, 6) DEFAULT 0;');
 
       // Tabla de transcripciones
       await this.pool.query(`
@@ -66,13 +70,13 @@ export class DbManager {
     }
   }
 
-  public async endCall(id: string) {
+  public async endCall(id: string, cost: number = 0) {
     try {
       await this.pool.query(
-        'UPDATE calls SET ended_at = CURRENT_TIMESTAMP, status = $1 WHERE id = $2',
-        ['completed', id]
+        'UPDATE calls SET ended_at = CURRENT_TIMESTAMP, status = $1, cost = $2 WHERE id = $3',
+        ['completed', cost, id]
       );
-      console.log(`[DB] ✅ Llamada finalizada en DB. ID: ${id}`);
+      console.log(`[DB] ✅ Llamada finalizada en DB. ID: ${id}, Costo Total: $${cost.toFixed(4)}`);
     } catch (error) {
       console.error(`[DB] ❌ Error al finalizar llamada (ID: ${id}):`, error);
     }
