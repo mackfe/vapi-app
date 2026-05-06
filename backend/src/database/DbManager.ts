@@ -8,10 +8,16 @@ export class DbManager {
   private pool: pkg.Pool;
 
   constructor() {
+    // Si por alguna razón no están cargadas, forzamos la carga desde el archivo
+    if (!process.env.DB_HOST) {
+      dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+    }
+
     const host = process.env.DB_HOST;
     const user = process.env.DB_USER;
     
-    console.log(`[DB] Configurando conexión hacia: ${host || 'UNDEFINED'} (User: ${user})`);
+    console.log(`[DB] Directorio de trabajo: ${process.cwd()}`);
+    console.log(`[DB] Configurando conexión hacia: ${host || 'UNDEFINED'} (User: ${user || 'undefined'})`);
 
     this.pool = new Pool({
       host: host,
