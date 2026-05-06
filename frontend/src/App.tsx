@@ -3,7 +3,7 @@ import { Phone, Mic, Activity, History, Settings, X, Calendar, Clock, ChevronRig
 import { io } from 'socket.io-client';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL || 'https://3fbk-cm.deepgaze.xyz';
 const socket = io(API_URL);
 
 interface Call {
