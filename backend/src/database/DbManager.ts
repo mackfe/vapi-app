@@ -8,18 +8,24 @@ export class DbManager {
   private pool: pkg.Pool;
 
   constructor() {
+    const host = process.env.DB_HOST;
+    const user = process.env.DB_USER;
+    
+    console.log(`[DB] Configurando conexión hacia: ${host || 'UNDEFINED'} (User: ${user})`);
+
     this.pool = new Pool({
-      host: process.env.DB_HOST,
-      user: process.env.DB_USER,
+      host: host,
+      user: user,
       password: process.env.DB_PASS,
       database: process.env.DB_NAME,
       port: parseInt(process.env.DB_PORT || '5432'),
-      ssl: false // Cambiar a true si el servidor requiere SSL
+      ssl: false 
     });
   }
 
   public async init() {
     try {
+      console.log(`[DB] Inicializando tablas en ${process.env.DB_HOST}...`);
       // Tabla de llamadas
       await this.pool.query(`
         CREATE TABLE IF NOT EXISTS calls (

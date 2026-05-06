@@ -1,13 +1,13 @@
+import * as dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
-import * as dotenv from 'dotenv';
 import cors from 'cors';
 import { SipManager } from './sip/SipManager.js';
 import { AiPipeline } from './ai/Pipeline.js';
 import { FishAudioClient } from './ai/FishAudioClient.js';
-
-dotenv.config();
 
 const app = express();
 app.use(cors());
