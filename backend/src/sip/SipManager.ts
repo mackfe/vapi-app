@@ -35,6 +35,10 @@ export class SipManager {
     this.io = io;
   }
 
+  public getDb() {
+    return this.db;
+  }
+
   public async start() {
     console.log(`[SIP] Iniciando registro para ${config.user}@${config.domain}...`);
     
@@ -181,7 +185,7 @@ export class SipManager {
     const callerUri = request.headers.from.uri;
     const callerId = callerUri.split(':')[1]?.split('@')[0] || 'Desconocido';
     
-    console.log(`[SIP] Llamada aceptada de: ${callerId}`);
+    console.log(`[SIP] Llamada aceptada de: ${callerId}. Intentando registrar en DB...`);
     if (this.io) this.io.emit('call-started', { callerId });
     
     // Registrar llamada en DB

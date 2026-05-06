@@ -54,8 +54,9 @@ export class DbManager {
         'INSERT INTO calls (id, caller_id) VALUES ($1, $2)',
         [id, callerId]
       );
+      console.log(`[DB] ✅ Llamada registrada exitosamente. ID: ${id}, Caller: ${callerId}`);
     } catch (error) {
-      console.error('[DB] Error al crear llamada:', error);
+      console.error(`[DB] ❌ Error al crear llamada (ID: ${id}):`, error);
     }
   }
 
@@ -65,8 +66,9 @@ export class DbManager {
         'UPDATE calls SET ended_at = CURRENT_TIMESTAMP, status = $1 WHERE id = $2',
         ['completed', id]
       );
+      console.log(`[DB] ✅ Llamada finalizada en DB. ID: ${id}`);
     } catch (error) {
-      console.error('[DB] Error al finalizar llamada:', error);
+      console.error(`[DB] ❌ Error al finalizar llamada (ID: ${id}):`, error);
     }
   }
 
@@ -76,8 +78,34 @@ export class DbManager {
         'INSERT INTO transcripts (call_id, role, content) VALUES ($1, $2, $3)',
         [callId, role, content]
       );
+      console.log(`[DB] 📝 Transcripción guardada (${role}): "${content.substring(0, 30)}..."`);
     } catch (error) {
-      console.error('[DB] Error al guardar transcripción:', error);
+      console.error(`[DB] ❌ Error al guardar transcripción para ${callId}:`, error);
+    }
+  }
+
+  public async getCalls() {
+    try {
+      const result = await this.pool.query(
+        'SELECT * FROM calls ORDER BY started_at DESC LIMIT 50'
+      );
+      return result.rows;
+    } catch (error) {
+      console.error('[DB] Error al obtener llamadas:', error);
+      return [];
+    }
+  }
+
+  public async getTranscripts(callId: string) {
+    try {
+      const result = await this.pool.query(
+        'SELECT * FROM transcripts WHERE call_id = $1 ORDER BY created_at ASC',
+        [callId]
+      );
+      return result.rows;
+    } catch (error) {
+      console.error('[DB] Error al obtener transcripciones:', error);
+      return [];
     }
   }
 }
