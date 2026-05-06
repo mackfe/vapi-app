@@ -182,10 +182,11 @@ export class SipManager {
     this.sipStack.send(response);
     
     // Extraer Caller ID del encabezado From
+    this.callId = uuidv4();
     const callerUri = request.headers.from.uri;
     const callerId = callerUri.split(':')[1]?.split('@')[0] || 'Desconocido';
     
-    console.log(`[SIP] Llamada aceptada de: ${callerId}. Intentando registrar en DB...`);
+    console.log(`[SIP] Llamada aceptada de: ${callerId}. Intentando registrar en DB... (ID: ${this.callId})`);
     if (this.io) this.io.emit('call-started', { callerId });
     
     // Registrar llamada en DB
@@ -307,7 +308,8 @@ export class SipManager {
     // Registrar fin de llamada con costo
     await this.db.endCall(this.callId, finalCost);
     
-    this.callId = uuidv4();
+    // Limpiar estado
+    this.rtpServer?.close();
     if (this.rtp) this.rtp.stop();
     if (this.io) this.io.emit('call-ended');
   }
