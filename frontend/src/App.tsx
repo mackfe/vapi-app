@@ -535,19 +535,72 @@ function App() {
             ) : (
               <motion.div key="settings" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="bg-[#16191e] rounded-[32px] border border-white/5 p-12 text-center">
                 <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-6">
-                  <Settings size={40} className="text-white/20" />
+                   <Settings size={40} className="text-white/20" />
                 </div>
                 <h3 className="text-xl font-bold mb-2">Configuración del Sistema</h3>
-                <p className="text-white/40 max-w-sm mx-auto mb-8">Ajustes de API, credenciales SIP y parámetros de la Inteligencia Artificial.</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
-                  <div className="bg-white/5 p-6 rounded-2xl border border-white/5 text-left">
-                    <p className="text-[10px] font-black uppercase text-white/20 mb-2">API Backend</p>
-                    <p className="text-sm font-mono break-all">{API_URL}</p>
+                <p className="text-white/40 mb-8 max-w-md mx-auto">Panel de ajustes globales y mantenimiento de base de datos.</p>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto text-left">
+                  {/* Card: Servicios */}
+                  <div className="bg-white/5 p-8 rounded-[32px] border border-white/5">
+                    <p className="text-[10px] font-black uppercase text-white/20 mb-6 tracking-widest">Estado de Servicios</p>
+                    <div className="space-y-6">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm font-medium">Socket.io (Realtime)</span>
+                        <div className="flex items-center gap-2">
+                          <div className={`w-1.5 h-1.5 rounded-full ${sipStatus === 'registered' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+                          <span className={sipStatus === 'registered' ? 'text-emerald-400 font-black text-xs' : 'text-red-400 font-black text-xs'}>
+                            {sipStatus === 'registered' ? 'CONECTADO' : 'FALLO / BLOCKED'}
+                          </span>
+                        </div>
+                      </div>
+                      {sipStatus !== 'registered' && (
+                        <div className="p-4 bg-red-500/10 rounded-2xl border border-red-500/20">
+                          <p className="text-[10px] text-red-400 leading-relaxed font-bold">
+                            ⚠️ ERROR DE WEBSOCKET DETECTADO
+                          </p>
+                          <p className="text-[10px] text-red-400/60 leading-relaxed italic mt-1">
+                            El administrador debe habilitar "Upgrade" y "Connection" en el proxy Nginx para permitir el tráfico en tiempo real.
+                          </p>
+                        </div>
+                      )}
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm font-medium">Base de Datos (REST)</span>
+                        <span className="text-emerald-400 font-black text-xs">ONLINE</span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="bg-white/5 p-6 rounded-2xl border border-white/5 text-left">
-                    <p className="text-[10px] font-black uppercase text-white/20 mb-2">Transporte Socket</p>
-                    <p className="text-sm font-bold">WebSocket + Polling</p>
+
+                  {/* Card: Mantenimiento */}
+                  <div className="bg-white/5 p-8 rounded-[32px] border border-white/5">
+                    <p className="text-[10px] font-black uppercase text-white/20 mb-6 tracking-widest">Mantenimiento</p>
+                    <div className="space-y-4">
+                      <button 
+                        onClick={async () => {
+                          try {
+                            const res = await fetch(`${API_URL}/api/admin/cleanup`, { method: 'POST' });
+                            if (res.ok) {
+                              addLog('Limpieza de llamadas completada', 'success');
+                              fetchCalls();
+                            }
+                          } catch (e) {
+                            addLog('Error al ejecutar limpieza', 'error');
+                          }
+                        }}
+                        className="w-full py-4 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 rounded-2xl text-xs font-black transition-all border border-emerald-500/20 uppercase tracking-widest"
+                      >
+                        Limpiar Llamadas "En Curso"
+                      </button>
+                      <p className="text-[10px] text-white/20 leading-relaxed">
+                        Esta acción cierra automáticamente cualquier llamada que haya quedado abierta por más de 30 minutos debido a reinicios del sistema.
+                      </p>
+                    </div>
                   </div>
+                </div>
+
+                <div className="mt-12 flex items-center justify-center gap-4 text-[10px] font-bold text-white/10 uppercase tracking-widest">
+                  <span>API Endpoint:</span>
+                  <span className="font-mono">{API_URL}</span>
                 </div>
               </motion.div>
             )}

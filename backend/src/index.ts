@@ -44,6 +44,15 @@ app.get('/api/calls/:id/transcripts', async (req, res) => {
   }
 });
 
+app.post('/api/admin/cleanup', async (req, res) => {
+  try {
+    await sip.getDb().cleanupAbandonedCalls();
+    res.json({ success: true, message: 'Limpieza completada' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al ejecutar limpieza' });
+  }
+});
+
 io.on('connection', (socket) => {
   console.log('[Dashboard] Cliente conectado');
 });
@@ -69,4 +78,9 @@ server.listen(port, () => {
   sip.start().catch((err: any) => {
     console.error('[SIP] Error crítico al iniciar:', err);
   });
+
+  // Limpieza automática cada 5 minutos
+  setInterval(() => {
+    sip.getDb().cleanupAbandonedCalls().catch(() => {});
+  }, 5 * 60 * 1000);
 });

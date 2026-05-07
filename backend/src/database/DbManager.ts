@@ -79,13 +79,31 @@ export class DbManager {
 
   public async endCall(id: string, cost: number = 0) {
     try {
-      await this.pool.query(
-        'UPDATE calls SET ended_at = CURRENT_TIMESTAMP, status = $1, cost = $2 WHERE id = $3',
+      const result = await this.pool.query(
+        'UPDATE calls SET ended_at = CURRENT_TIMESTAMP, status = $1, cost = $2 WHERE id = $3 AND ended_at IS NULL',
         ['completed', cost, id]
       );
       console.log(`[DB] ✅ Llamada finalizada en DB. ID: ${id}, Costo Total: $${cost.toFixed(4)}`);
     } catch (error) {
       console.error(`[DB] ❌ Error al finalizar llamada (ID: ${id}):`, error);
+    }
+  }
+
+  /**
+   * Cierra llamadas que quedaron abiertas (más de 30 minutos) por fallos de red o reinicios
+   */
+  public async cleanupAbandonedCalls() {
+    try {
+      await this.pool.query(`
+        UPDATE calls 
+        SET ended_at = CURRENT_TIMESTAMP, 
+            status = 'abandoned' 
+        WHERE ended_at IS NULL 
+        AND started_at < NOW() - INTERVAL '30 minutes'
+      `);
+      console.log('[DB] ✅ Llamadas abandonadas limpiadas correctamente.');
+    } catch (error) {
+      console.error('[DB] ❌ Error al limpiar llamadas abandonadas:', error);
     }
   }
 
