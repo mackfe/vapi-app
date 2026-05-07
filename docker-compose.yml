@@ -19,7 +19,7 @@ services:
     build:
       context: ./frontend
       args:
-        - VITE_API_URL=http://${VPS_IP}:5000
+        - VITE_API_URL=https://3fbk-cm.deepgaze.xyz
     container_name: vapi-frontend
     restart: always
     ports:
