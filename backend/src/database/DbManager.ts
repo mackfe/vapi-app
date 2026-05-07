@@ -90,18 +90,19 @@ export class DbManager {
   }
 
   /**
-   * Cierra llamadas que quedaron abiertas (más de 30 minutos) por fallos de red o reinicios
+   * Cierra llamadas que quedaron abiertas (más de 30 minutos) por fallos de red o reinicios.
+   * Se les asigna una duración fija de 5 minutos para no ensuciar las métricas con horas falsas.
    */
   public async cleanupAbandonedCalls() {
     try {
       await this.pool.query(`
         UPDATE calls 
-        SET ended_at = CURRENT_TIMESTAMP, 
+        SET ended_at = started_at + INTERVAL '5 minutes', 
             status = 'abandoned' 
         WHERE ended_at IS NULL 
         AND started_at < NOW() - INTERVAL '30 minutes'
       `);
-      console.log('[DB] ✅ Llamadas abandonadas limpiadas correctamente.');
+      console.log('[DB] ✅ Llamadas abandonadas limpiadas (con duración normalizada).');
     } catch (error) {
       console.error('[DB] ❌ Error al limpiar llamadas abandonadas:', error);
     }
