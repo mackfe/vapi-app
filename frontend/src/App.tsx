@@ -4,7 +4,11 @@ import { io } from 'socket.io-client';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://3fbk-cm.deepgaze.xyz';
-const socket = io(API_URL);
+const socket = io(API_URL, {
+  transports: ['websocket', 'polling'],
+  reconnectionAttempts: 10,
+  reconnectionDelay: 2000,
+});
 
 interface Call {
   id: string;
@@ -30,6 +34,11 @@ function App() {
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [showCallAlert, setShowCallAlert] = useState(false);
   
+  // Estados de UI
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'settings'>('dashboard');
+  const [sipStatus, setSipStatus] = useState<'registered' | 'error' | 'connecting'>('connecting');
+  const [searchTerm, setSearchTerm] = useState('');
+
   // Base de datos real
   const [calls, setCalls] = useState<Call[]>([]);
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
@@ -43,9 +52,11 @@ function App() {
   
   const [audioCtx] = useState(() => new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 8000 }));
 
-  // Cargar historial al inicio
   useEffect(() => {
     fetchCalls();
+    // Refrescar cada 30 segundos como respaldo si el socket falla
+    const interval = setInterval(fetchCalls, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -55,10 +66,17 @@ function App() {
   const fetchCalls = async () => {
     try {
       const response = await fetch(`${API_URL}/api/calls`);
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || 'Error de servidor');
+      }
       const data = await response.json();
       setCalls(data);
-    } catch (error) {
-      addLog('Error al cargar historial de llamadas', 'error');
+    } catch (error: any) {
+      // Solo loguear error si la lista está vacía o es un error crítico
+      if (calls.length === 0) {
+        addLog(`Historial: ${error.message || 'Sin conexión'}`, 'error');
+      }
     }
   };
 
@@ -69,13 +87,22 @@ function App() {
       const data = await response.json();
       setSelectedTranscripts(data);
     } catch (error) {
-      addLog('Error al cargar transcripción', 'error');
+      addLog('No se pudo obtener el detalle de la llamada', 'error');
     } finally {
       setIsLoadingTranscripts(false);
     }
   };
 
   useEffect(() => {
+    socket.on('connect', () => {
+      addLog('Panel de control sincronizado', 'success');
+      setSipStatus('registered');
+    });
+
+    socket.on('connect_error', () => {
+      setSipStatus('error');
+    });
+
     socket.on('transcription', (text) => {
       setTranscription((prev) => [...prev, text]);
     });
@@ -84,19 +111,19 @@ function App() {
       setIsCalling(true);
       setCallerId(data.callerId || 'Anónimo');
       setShowCallAlert(true);
-      addLog(`Llamada entrante de ${data.callerId}`, 'success');
-      fetchCalls(); // Refrescar lista para ver la llamada en curso
+      addLog(`Llamada en curso: ${data.callerId}`, 'success');
+      fetchCalls();
     });
 
     socket.on('call-ended', () => {
       setIsCalling(false);
       setShowCallAlert(false);
-      addLog('Llamada finalizada', 'info');
-      setTimeout(fetchCalls, 1000); // Dar tiempo a la DB para cerrar la llamada
+      addLog('Sesión de voz finalizada', 'info');
+      setTimeout(fetchCalls, 1500);
     });
 
     socket.on('sip-error', (data) => {
-      addLog(`${data.message} (Status: ${data.status})`, 'error');
+      addLog(`Servicio SIP: ${data.message}`, 'error');
     });
 
     socket.on('audio-chunk', (chunk: ArrayBuffer) => {
@@ -106,6 +133,8 @@ function App() {
     });
 
     return () => {
+      socket.off('connect');
+      socket.off('connect_error');
       socket.off('transcription');
       socket.off('call-started');
       socket.off('call-ended');
@@ -115,7 +144,11 @@ function App() {
   }, [isMonitoring, callerId]);
 
   const addLog = (msg: string, type: 'error' | 'info' | 'success') => {
-    setLogs(prev => [{ msg, type, time: new Date().toLocaleTimeString() }, ...prev]);
+    setLogs(prev => {
+      // Evitar mensajes duplicados seguidos
+      if (prev.length > 0 && prev[0].msg === msg) return prev;
+      return [{ msg, type, time: new Date().toLocaleTimeString() }, ...prev];
+    });
   };
 
   const playPcmChunk = (chunk: ArrayBuffer) => {
@@ -142,184 +175,358 @@ function App() {
     }).format(date);
   };
 
+  const calculateDuration = (start: string, end: string | null) => {
+    if (!end) return 'En curso...';
+    const s = new Date(start);
+    const e = new Date(end);
+    const diff = Math.floor((e.getTime() - s.getTime()) / 1000);
+    const mins = Math.floor(diff / 60);
+    const secs = diff % 60;
+    return `${mins}m ${secs}s`;
+  };
+
   return (
-    <div className="min-h-screen bg-[#0f1115] text-white font-sans flex overflow-hidden">
+    <div className="min-h-screen bg-[#0b0d11] text-white font-sans flex overflow-hidden selection:bg-emerald-500/30">
       {/* Sidebar */}
-      <aside className="w-20 lg:w-64 bg-[#16191e] border-r border-white/10 flex flex-col p-4">
-        <div className="flex items-center gap-3 px-4 py-6">
-          <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center">
-            <Activity size={24} />
+      <aside className="w-20 lg:w-64 bg-[#111419] border-r border-white/5 flex flex-col p-4 z-50">
+        <div className="flex items-center gap-3 px-4 py-8 mb-4">
+          <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/20">
+            <Activity size={22} className="text-white" />
           </div>
-          <span className="text-xl font-bold hidden lg:block tracking-tight text-emerald-500">Municipio 3F</span>
+          <div className="hidden lg:block">
+            <h1 className="font-black text-lg tracking-tight leading-tight">Municipio 3F</h1>
+            <p className="text-[10px] text-white/30 uppercase tracking-[0.2em] font-bold">Control AI</p>
+          </div>
         </div>
 
-        <nav className="flex-1 mt-8 space-y-2">
-          <NavItem icon={<Activity />} label="Panel Principal" active />
-          <NavItem icon={<History />} label="Llamadas" />
-          <NavItem icon={<Settings />} label="Configuración" />
+        <nav className="flex-1 space-y-2">
+          <NavItem 
+            icon={<Activity size={20} />} 
+            label="Panel Principal" 
+            active={activeTab === 'dashboard'} 
+            onClick={() => setActiveTab('dashboard')} 
+          />
+          <NavItem 
+            icon={<History size={20} />} 
+            label="Llamadas" 
+            active={activeTab === 'history'} 
+            onClick={() => setActiveTab('history')} 
+          />
+          <NavItem 
+            icon={<Settings size={20} />} 
+            label="Configuración" 
+            active={activeTab === 'settings'} 
+            onClick={() => setActiveTab('settings')} 
+          />
         </nav>
 
-        <div className="p-4 bg-white/5 rounded-2xl mb-4">
-          <p className="text-[10px] text-white/40 mb-2 uppercase tracking-widest font-bold">Monitor de Audio</p>
-          <button 
-            onClick={() => {
-              if (audioCtx.state === 'suspended') audioCtx.resume();
-              setIsMonitoring(!isMonitoring);
-            }}
-            className={`w-full py-2 rounded-xl text-xs font-bold transition-all ${isMonitoring ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20' : 'bg-white/10 text-white/60'}`}
-          >
-            {isMonitoring ? 'MONITOREO ACTIVO' : 'ESCUCHAR LLAMADA'}
-          </button>
-        </div>
+        <div className="mt-auto space-y-4">
+          <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+            <p className="text-[10px] text-white/30 uppercase font-bold mb-3 tracking-widest">Monitor de Audio</p>
+            <button 
+              onClick={() => {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                setIsMonitoring(!isMonitoring);
+              }}
+              className={`w-full py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                isMonitoring 
+                  ? 'bg-red-500/20 text-red-400 border border-red-500/20' 
+                  : 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 hover:scale-[1.02]'
+              }`}
+            >
+              {isMonitoring ? 'Detener Escucha' : 'Escuchar Llamada'}
+            </button>
+          </div>
 
-        <div className="p-4 bg-white/5 rounded-2xl hidden lg:block">
-          <p className="text-xs text-white/40 mb-2 uppercase tracking-widest font-semibold">Estado SIP</p>
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${logs.some(l => l.type === 'error') ? 'bg-red-500' : 'bg-green-500'} animate-pulse`} />
-            <span className="text-sm font-medium">{logs.some(l => l.type === 'error') ? 'Error de Conexión' : 'Registrado'}</span>
+          <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+            <p className="text-[10px] text-white/30 uppercase font-bold mb-3 tracking-widest">Estado SIP</p>
+            <div className="flex items-center gap-3">
+              <div className={`w-2 h-2 rounded-full animate-pulse ${
+                sipStatus === 'registered' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-red-500'
+              }`} />
+              <span className="text-xs font-bold text-white/80">
+                {sipStatus === 'registered' ? 'Sistema Activo' : 'Error de Conexión'}
+              </span>
+            </div>
           </div>
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 relative flex flex-col h-screen">
-        {/* Header */}
-        <header className="h-20 border-b border-white/10 flex items-center justify-between px-8 bg-[#0f1115]/50 backdrop-blur-md sticky top-0 z-10 shrink-0">
-          <div>
-            <h1 className="text-2xl font-bold">Centro de Control</h1>
-            <p className="text-white/40 text-sm">Municipio de 3 de Febrero • Agente VoIP</p>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="bg-white/5 p-2 rounded-lg border border-white/10">
-              <span className="text-sm px-2 py-1 bg-green-500/10 text-green-500 rounded-md font-medium">Activo</span>
+      <main className="flex-1 relative overflow-y-auto bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.05),_transparent_40%)] custom-scrollbar">
+        <header className="p-8 pb-0">
+          <div className="flex justify-between items-end">
+            <div>
+              <h2 className="text-3xl font-black tracking-tight mb-1">
+                {activeTab === 'dashboard' ? 'Centro de Control' : 
+                 activeTab === 'history' ? 'Historial de Llamadas' : 'Configuración'}
+              </h2>
+              <p className="text-white/40 font-medium">
+                {activeTab === 'dashboard' ? 'Panel de Gestión de Agentes VoIP e IA' : 
+                 activeTab === 'history' ? 'Registro completo de interacciones vecinales' : 'Ajustes del sistema'}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-full border border-emerald-500/20 text-xs font-bold">
+              <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping" />
+              {sipStatus === 'registered' ? 'Sincronizado' : 'Reconectando...'}
             </div>
           </div>
         </header>
 
-        {/* Content Area */}
-        <div className="flex-1 p-8 space-y-8 overflow-y-auto">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-full">
-            {/* Active Call Section */}
-            <div className="lg:col-span-2 space-y-8 h-full flex flex-col">
-              <section className="bg-gradient-to-br from-[#1c2128] to-[#16191e] rounded-3xl p-8 border border-white/5 shadow-2xl relative overflow-hidden shrink-0">
-                <div className="flex items-center justify-between mb-8 relative z-10">
-                   <div className="flex items-center gap-6">
-                    <div className={`p-4 rounded-2xl ${isCalling ? 'bg-red-500/20 text-red-500 ring-4 ring-red-500/10 animate-pulse' : 'bg-blue-500/10 text-blue-400'}`}>
-                      <Phone size={28} />
+        <div className="p-8">
+          <AnimatePresence mode="wait">
+            {activeTab === 'dashboard' ? (
+              <motion.div 
+                key="dashboard"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="grid grid-cols-1 xl:grid-cols-3 gap-8"
+              >
+                {/* Left Column: Real-time Monitor */}
+                <div className="xl:col-span-2 space-y-8">
+                  <section className="bg-[#16191e] rounded-[32px] border border-white/5 overflow-hidden shadow-2xl">
+                    <div className="p-6 bg-white/5 flex items-center justify-between border-b border-white/5">
+                      <div className="flex items-center gap-4">
+                        <div className={`p-3 rounded-2xl ${isCalling ? 'bg-red-500/20 text-red-500' : 'bg-white/5 text-white/40'}`}>
+                          <Phone size={24} className={isCalling ? 'animate-pulse' : ''} />
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-lg">{isCalling ? 'Llamada Activa' : 'Esperando consultas...'}</h3>
+                          <p className="text-xs text-white/30 font-medium">
+                            {isCalling ? `Conectado con: ${callerId}` : 'IA operando con Base Municipal'}
+                          </p>
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <h2 className="text-xl font-bold">{isCalling ? `Llamada de: ${callerId}` : 'Esperando consultas...'}</h2>
-                      <p className="text-white/40 text-sm">{isCalling ? 'Monitoreo en tiempo real activo' : 'IA operando con Base Municipal'}</p>
-                    </div>
-                  </div>
-                  {isCalling && (
-                    <div className="flex gap-2">
-                       <span className="px-3 py-1 bg-white/10 rounded-full text-xs font-mono">EN VIVO</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="h-[400px] bg-black/30 rounded-2xl p-6 border border-white/5 flex flex-col gap-4">
-                   <div className="flex-1 space-y-4 overflow-y-auto pr-4 scrollbar-thin scrollbar-thumb-white/10">
-                    <AnimatePresence>
-                      {transcription.length === 0 ? (
-                        <div className="h-full flex flex-col items-center justify-center text-white/20">
-                          <Mic size={48} className="mb-4 opacity-50" />
-                          <p>Las transcripciones aparecerán aquí</p>
+                    
+                    <div className="p-8 min-h-[400px] flex flex-col items-center justify-center relative">
+                      {!isCalling ? (
+                        <div className="text-center group cursor-default">
+                          <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-6 group-hover:bg-white/10 transition-colors">
+                            <Mic size={32} className="text-white/10 group-hover:text-white/20" />
+                          </div>
+                          <p className="text-white/20 font-medium max-w-[200px]">Las transcripciones aparecerán aquí en tiempo real</p>
                         </div>
                       ) : (
-                        transcription.map((t, i) => (
-                          <motion.div 
-                            key={i} 
-                            initial={{ opacity: 0, y: 10 }} 
-                            animate={{ opacity: 1, y: 0 }}
-                            className={`flex ${t.startsWith('Vecino:') ? 'justify-start' : 'justify-end'}`}
-                          >
-                            <div className={`max-w-[80%] p-4 rounded-2xl ${t.startsWith('Vecino:') ? 'bg-emerald-600/20 border border-emerald-600/20' : 'bg-white/5 border border-white/10'}`}>
-                                <p className="text-[10px] uppercase tracking-widest font-bold opacity-40 mb-1">
-                                  {t.startsWith('Vecino:') ? 'Vecino' : 'Agente IA'}
-                                </p>
-                                {t.replace(/^(Vecino:|IA:)/, '').trim()}
-                            </div>
-                          </motion.div>
-                        ))
+                        <div className="w-full space-y-4">
+                          {transcription.map((line, idx) => (
+                            <motion.div 
+                              initial={{ opacity: 0, x: -10 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              key={idx} 
+                              className="bg-white/5 p-4 rounded-2xl border border-white/5 text-sm leading-relaxed"
+                            >
+                              {line}
+                            </motion.div>
+                          ))}
+                        </div>
                       )}
-                    </AnimatePresence>
-                   </div>
-                </div>
-              </section>
-
-              {/* Logs Section */}
-              <section className="bg-[#16191e] rounded-3xl p-6 border border-white/5 flex-1 overflow-hidden flex flex-col min-h-[250px]">
-                <h3 className="text-lg font-bold mb-4 flex items-center gap-2 shrink-0">
-                  <Activity size={20} className="text-emerald-500" />
-                  Registro de Eventos
-                </h3>
-                <div className="space-y-2 overflow-y-auto pr-2 flex-1">
-                  {logs.map((log, i) => (
-                    <div key={i} className={`p-3 rounded-xl flex justify-between items-center text-sm border ${log.type === 'error' ? 'bg-red-500/10 border-red-500/20 text-red-100' : 'bg-white/5 border-white/5 text-white/80'}`}>
-                       <span className="flex items-center gap-2">
-                         <div className={`w-1.5 h-1.5 rounded-full ${log.type === 'error' ? 'bg-red-500' : 'bg-emerald-500'}`} />
-                         {log.msg}
-                       </span>
-                       <span className="text-[10px] opacity-40 uppercase">{log.time}</span>
                     </div>
-                  ))}
-                </div>
-              </section>
-            </div>
+                  </section>
 
-            {/* History Section */}
-            <div className="space-y-8 flex flex-col h-full overflow-hidden">
-               <section className="bg-[#16191e] rounded-3xl p-6 border border-white/5 flex flex-col h-full">
-                 <h3 className="text-lg font-bold mb-6 flex items-center gap-2 shrink-0">
-                   <History size={20} className="text-emerald-500" />
-                   Historial de la Base de Datos
-                 </h3>
-                 <div className="space-y-3 overflow-y-auto pr-2 flex-1 scrollbar-hide">
-                   {calls.length === 0 ? (
-                     <div className="h-full flex flex-col items-center justify-center opacity-20 italic text-sm">
-                       No hay llamadas registradas
-                     </div>
-                   ) : (
-                     calls.map(call => (
-                       <motion.div 
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        key={call.id} 
-                        onClick={() => {
-                          setSelectedCall(call);
-                          fetchTranscripts(call.id);
-                        }}
-                        className="p-4 bg-white/5 rounded-2xl hover:bg-emerald-500/10 transition-all border border-white/5 hover:border-emerald-500/20 group cursor-pointer"
-                       >
-                          <div className="flex justify-between items-start mb-2">
-                            <span className="font-bold text-white/90">{call.caller_id}</span>
-                            <ChevronRight size={16} className="text-white/20 group-hover:text-emerald-500 group-hover:translate-x-1 transition-all" />
-                          </div>
-                          <div className="flex items-center gap-4 text-[10px] text-white/40 uppercase font-bold tracking-widest">
-                            <div className="flex items-center gap-1">
-                              <Calendar size={10} />
-                              {formatDateTime(call.started_at)}
+                  {/* Event Log */}
+                  <section className="space-y-4">
+                    <h3 className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-white/40 px-2">
+                      <Activity size={14} className="text-emerald-500" />
+                      Registro de Eventos
+                    </h3>
+                    <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                      <AnimatePresence initial={false}>
+                        {logs.map((log, idx) => (
+                          <motion.div 
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            key={idx}
+                            className={`flex items-center justify-between p-4 rounded-2xl border text-sm transition-all ${
+                              log.type === 'error' ? 'bg-red-500/10 border-red-500/10 text-red-400' :
+                              log.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/10 text-emerald-400' :
+                              'bg-white/5 border-white/5 text-white/60'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className={`w-1.5 h-1.5 rounded-full ${
+                                log.type === 'error' ? 'bg-red-400' :
+                                log.type === 'success' ? 'bg-emerald-400' : 'bg-white/30'
+                              }`} />
+                              <span className="font-medium">{log.msg}</span>
                             </div>
-                            <div className={`px-2 py-0.5 rounded ${call.status === 'ongoing' ? 'bg-red-500/20 text-red-400' : 'bg-white/10 text-white/40'}`}>
-                              {call.status === 'ongoing' ? 'En Vivo' : 'Finalizada'}
-                            </div>
-                            {call.cost > 0 && (
-                              <div className="bg-emerald-500/10 text-emerald-500/80 px-2 py-0.5 rounded border border-emerald-500/10">
-                                ${Number(call.cost).toFixed(4)}
+                            <span className="text-[10px] font-bold opacity-30">{log.time}</span>
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
+                    </div>
+                  </section>
+                </div>
+
+                {/* Right Column: History Sidebar */}
+                <div className="space-y-6">
+                   <section className="bg-[#16191e] rounded-[32px] border border-white/5 overflow-hidden flex flex-col h-[700px] shadow-2xl">
+                      <div className="p-6 bg-white/5 border-b border-white/5 flex items-center justify-between">
+                        <h3 className="flex items-center gap-3 font-bold">
+                          <History size={18} className="text-emerald-500" />
+                          Historial Reciente
+                        </h3>
+                        <button onClick={fetchCalls} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/40">
+                          <Activity size={14} />
+                        </button>
+                      </div>
+                      
+                      <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                        {calls.length === 0 ? (
+                          <div className="py-20 text-center text-white/20 italic">Cargando base de datos...</div>
+                        ) : (
+                          <>
+                            {calls.slice(0, 8).map((call) => (
+                              <motion.div 
+                                key={call.id}
+                                whileHover={{ scale: 1.02 }}
+                                onClick={() => {
+                                  setSelectedCall(call);
+                                  fetchTranscripts(call.id);
+                                }}
+                                className="group p-4 bg-white/[0.02] hover:bg-white/5 rounded-[24px] border border-white/5 cursor-pointer transition-all"
+                              >
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-xs font-black text-white/90">{call.caller_id}</span>
+                                  <span className="text-[9px] font-bold text-white/20 uppercase">{calculateDuration(call.started_at, call.ended_at)}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-[10px] text-white/30 font-bold uppercase">
+                                  <span>{formatDateTime(call.started_at)}</span>
+                                  {call.cost > 0 && <span className="text-emerald-500">${Number(call.cost).toFixed(4)}</span>}
+                                </div>
+                              </motion.div>
+                            ))}
+                            <button 
+                              onClick={() => setActiveTab('history')}
+                              className="w-full py-4 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-500 hover:bg-emerald-500/5 rounded-2xl transition-all"
+                            >
+                              Ver todo el historial
+                            </button>
+                          </>
+                        )}
+                      </div>
+                   </section>
+                </div>
+              </motion.div>
+            ) : activeTab === 'history' ? (
+              <motion.div 
+                key="history"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="space-y-6"
+              >
+                <div className="bg-[#16191e] rounded-[32px] border border-white/5 p-8 shadow-2xl">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+                    <div className="relative flex-1 max-w-md">
+                      <input 
+                        type="text" 
+                        placeholder="Buscar por número o ID..." 
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-sm focus:outline-none focus:border-emerald-500/50 transition-all pl-12"
+                      />
+                      <Activity size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" />
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="text-right hidden md:block">
+                        <p className="text-[10px] text-white/20 font-black uppercase tracking-widest">Total Llamadas</p>
+                        <p className="text-xl font-black">{calls.length}</p>
+                      </div>
+                      <button onClick={fetchCalls} className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-4 rounded-2xl font-black text-sm transition-all shadow-lg shadow-emerald-500/20">
+                        ACTUALIZAR
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-separate border-spacing-y-3">
+                      <thead>
+                        <tr className="text-[10px] font-black uppercase tracking-[0.2em] text-white/20">
+                          <th className="px-6 pb-2">Vecino / ID</th>
+                          <th className="px-6 pb-2">Fecha y Hora</th>
+                          <th className="px-6 pb-2">Duración</th>
+                          <th className="px-6 pb-2">Costo</th>
+                          <th className="px-6 pb-2 text-right">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {calls
+                          .filter(c => c.caller_id.toLowerCase().includes(searchTerm.toLowerCase()) || c.id.toLowerCase().includes(searchTerm.toLowerCase()))
+                          .map((call) => (
+                          <tr 
+                            key={call.id} 
+                            onClick={() => { setSelectedCall(call); fetchTranscripts(call.id); }}
+                            className="group bg-white/[0.02] hover:bg-white/5 transition-all cursor-pointer"
+                          >
+                            <td className="px-6 py-5 rounded-l-2xl border-y border-l border-white/5">
+                              <div className="flex items-center gap-4">
+                                <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center group-hover:bg-emerald-500/20 group-hover:text-emerald-500 transition-all">
+                                  <Phone size={18} />
+                                </div>
+                                <div>
+                                  <p className="font-bold text-sm">{call.caller_id}</p>
+                                  <p className="text-[10px] font-medium text-white/20 tracking-tighter uppercase">{call.id.slice(0,18)}...</p>
+                                </div>
                               </div>
-                            )}
-                          </div>
-                       </motion.div>
-                     ))
-                   )}
-                 </div>
-               </section>
-            </div>
-          </div>
+                            </td>
+                            <td className="px-6 py-5 border-y border-white/5">
+                              <p className="text-sm font-medium">{formatDateTime(call.started_at)}</p>
+                            </td>
+                            <td className="px-6 py-5 border-y border-white/5">
+                              <div className="flex items-center gap-2">
+                                <Clock size={14} className="text-white/20" />
+                                <span className="text-sm font-bold">{calculateDuration(call.started_at, call.ended_at)}</span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-5 border-y border-white/5">
+                              <span className="text-sm font-black text-emerald-500">${Number(call.cost).toFixed(4)}</span>
+                            </td>
+                            <td className="px-6 py-5 rounded-r-2xl border-y border-r border-white/5 text-right">
+                              <button className="p-3 bg-white/5 hover:bg-emerald-500 hover:text-white rounded-xl transition-all">
+                                <ChevronRight size={18} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {calls.length === 0 && (
+                      <div className="py-20 text-center text-white/20 italic">No hay registros para mostrar.</div>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div 
+                key="settings"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="bg-[#16191e] rounded-[32px] border border-white/5 p-12 text-center"
+              >
+                <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <Settings size={40} className="text-white/20" />
+                </div>
+                <h3 className="text-xl font-bold mb-2">Configuración del Sistema</h3>
+                <p className="text-white/40 max-w-sm mx-auto mb-8">Ajustes de API, credenciales SIP y parámetros de la Inteligencia Artificial.</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
+                  <div className="bg-white/5 p-6 rounded-2xl border border-white/5 text-left">
+                    <p className="text-[10px] font-black uppercase text-white/20 mb-2">API Backend</p>
+                    <p className="text-sm font-mono break-all">{API_URL}</p>
+                  </div>
+                  <div className="bg-white/5 p-6 rounded-2xl border border-white/5 text-left">
+                    <p className="text-[10px] font-black uppercase text-white/20 mb-2">Transporte Socket</p>
+                    <p className="text-sm font-bold">WebSocket + Polling</p>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </main>
+
 
       {/* Transcript Detail Modal */}
       <AnimatePresence>
@@ -330,48 +537,47 @@ function App() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setSelectedCall(null)}
-              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/90 backdrop-blur-md"
             />
             <motion.div 
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-[#1c2128] w-full max-w-2xl rounded-3xl border border-white/10 shadow-2xl relative z-10 overflow-hidden flex flex-col max-h-[85vh]"
+              className="bg-[#1c2128] w-full max-w-2xl rounded-[40px] border border-white/10 shadow-2xl relative z-10 overflow-hidden flex flex-col max-h-[85vh]"
             >
-              <div className="p-6 border-b border-white/10 flex items-center justify-between bg-white/5">
+              <div className="p-8 border-b border-white/5 flex items-center justify-between bg-white/5">
                 <div>
-                  <h3 className="text-xl font-bold text-emerald-500">Detalles de la Llamada</h3>
-                  <p className="text-sm text-white/40">{selectedCall.caller_id} • {formatDateTime(selectedCall.started_at)}</p>
+                  <h3 className="text-2xl font-black tracking-tight text-emerald-500 mb-1">Detalle de Llamada</h3>
+                  <p className="text-xs text-white/40 font-bold uppercase tracking-widest">{selectedCall.caller_id} • {formatDateTime(selectedCall.started_at)}</p>
                 </div>
                 <button 
                   onClick={() => setSelectedCall(null)}
-                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                  className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl transition-colors"
                 >
                   <X size={24} />
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-[#0f1115]/50">
+              <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-[#0f1115]/30 custom-scrollbar">
                 {isLoadingTranscripts ? (
                   <div className="h-64 flex items-center justify-center">
-                    <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                    <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
                   </div>
                 ) : selectedTranscripts.length === 0 ? (
-                  <p className="text-center text-white/20 italic py-20">No hay transcripciones disponibles para esta llamada.</p>
+                  <div className="text-center py-20">
+                    <p className="text-white/20 italic">No se encontraron transcripciones registradas.</p>
+                  </div>
                 ) : (
                   selectedTranscripts.map((t) => (
                     <div key={t.id} className={`flex flex-col ${t.role === 'user' ? 'items-start' : 'items-end'}`}>
-                      <div className="flex items-center gap-2 mb-2 px-1">
-                        <span className="text-[10px] font-bold uppercase tracking-widest opacity-40">
+                      <div className="flex items-center gap-2 mb-2 px-2">
+                        <span className={`text-[10px] font-black uppercase tracking-widest ${t.role === 'user' ? 'text-emerald-500' : 'text-white/40'}`}>
                           {t.role === 'user' ? 'Vecino' : 'IA Municipio'}
                         </span>
-                        <span className="text-[10px] opacity-20">
-                          {new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                        </span>
                       </div>
-                      <div className={`p-4 rounded-2xl max-w-[90%] text-sm leading-relaxed ${
+                      <div className={`p-5 rounded-[24px] max-w-[85%] text-sm leading-relaxed shadow-sm ${
                         t.role === 'user' 
-                          ? 'bg-emerald-600/20 border border-emerald-600/20 text-white/90 rounded-tl-none' 
+                          ? 'bg-emerald-600/20 border border-emerald-500/10 text-white/90 rounded-tl-none' 
                           : 'bg-white/5 border border-white/10 text-white/80 rounded-tr-none'
                       }`}>
                         {t.content}
@@ -381,12 +587,15 @@ function App() {
                 )}
               </div>
 
-              <div className="p-6 border-t border-white/10 bg-white/5 flex justify-end">
+              <div className="p-8 border-t border-white/5 bg-white/5 flex justify-between items-center">
+                <div className="text-xs font-bold text-white/20 uppercase tracking-widest">
+                  ID: {selectedCall.id.slice(0,8)}...
+                </div>
                 <button 
                   onClick={() => setSelectedCall(null)}
-                  className="px-6 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-sm font-bold transition-all"
+                  className="px-8 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl text-sm font-black transition-all shadow-lg shadow-emerald-500/20"
                 >
-                  Cerrar Historial
+                  VOLVER
                 </button>
               </div>
             </motion.div>
@@ -401,14 +610,14 @@ function App() {
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 100, opacity: 0 }}
-            className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[150] bg-emerald-600 p-1 rounded-2xl shadow-2xl flex items-center gap-4 border border-white/20"
+            className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[150] bg-emerald-600 p-2 rounded-[32px] shadow-[0_20px_50px_rgba(16,185,129,0.3)] flex items-center gap-6 border border-white/20"
           >
-            <div className="bg-white/10 p-3 rounded-xl ml-1">
-              <Phone size={24} className="animate-bounce" />
+            <div className="bg-white/20 p-4 rounded-[24px] ml-1">
+              <Phone size={28} className="animate-bounce" />
             </div>
-            <div className="pr-4">
-              <p className="text-[10px] uppercase font-bold tracking-widest opacity-70">Nueva Llamada Entrante</p>
-              <p className="font-bold">{callerId}</p>
+            <div>
+              <p className="text-[10px] uppercase font-black tracking-[0.2em] text-white/60 mb-1">Entrante</p>
+              <p className="text-lg font-black text-white">{callerId}</p>
             </div>
             <button 
               onClick={() => {
@@ -416,7 +625,7 @@ function App() {
                 setIsMonitoring(true);
                 setShowCallAlert(false);
               }}
-              className="bg-white text-emerald-600 px-6 py-3 rounded-xl font-bold hover:bg-emerald-50 transition-colors mr-1"
+              className="bg-white text-emerald-600 px-8 py-4 rounded-[24px] font-black text-sm hover:bg-emerald-50 transition-all active:scale-95 mr-1 shadow-lg"
             >
               MONITORIZAR
             </button>
@@ -427,14 +636,16 @@ function App() {
   );
 }
 
-function NavItem({ icon, label, active = false }: { icon: React.ReactNode, label: string, active?: boolean }) {
+function NavItem({ icon, label, active = false, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick: () => void }) {
   return (
-    <div className={`
-      flex items-center gap-4 px-4 py-3 rounded-xl cursor-pointer transition-all duration-200
-      ${active ? 'bg-emerald-600 text-white' : 'text-white/40 hover:text-white hover:bg-white/5'}
+    <div 
+      onClick={onClick}
+      className={`
+      flex items-center gap-4 px-4 py-4 rounded-2xl cursor-pointer transition-all duration-300
+      ${active ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'text-white/20 hover:text-white hover:bg-white/5'}
     `}>
       {icon}
-      <span className="font-semibold hidden lg:block">{label}</span>
+      <span className="font-bold text-sm hidden lg:block tracking-tight">{label}</span>
     </div>
   );
 }
