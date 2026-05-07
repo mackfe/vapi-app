@@ -163,6 +163,17 @@ function App() {
     });
   };
 
+  const stats = React.useMemo(() => {
+    const totalCalls = calls.length;
+    const totalCost = calls.reduce((acc, c) => acc + Number(c.cost || 0), 0);
+    const totalSeconds = calls.reduce((acc, c) => {
+      if (!c.ended_at) return acc;
+      return acc + (new Date(c.ended_at).getTime() - new Date(c.started_at).getTime()) / 1000;
+    }, 0);
+    const totalMinutes = (totalSeconds / 60).toFixed(1);
+    return { totalCalls, totalCost, totalMinutes };
+  }, [calls]);
+
   const playPcmChunk = (chunk: ArrayBuffer) => {
     const int16Array = new Int16Array(chunk);
     const float32Array = new Float32Array(int16Array.length);
@@ -413,8 +424,113 @@ function App() {
                 </div>
               </motion.div>
             ) : activeTab === 'history' ? (
-              <motion.div key="history" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
-                 {/* Table content truncated for clarity but preserved in logic */}
+              <motion.div 
+                key="history" 
+                initial={{ opacity: 0, y: 10 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, y: -10 }} 
+                className="space-y-6"
+              >
+                {/* Panel de Métricas */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-[#16191e] p-6 rounded-[24px] border border-white/5 shadow-xl">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">Total Llamadas</p>
+                    <div className="flex items-end gap-3">
+                      <p className="text-3xl font-black text-white">{stats.totalCalls}</p>
+                      <span className="text-emerald-500 text-xs font-bold mb-1">↑ Activo</span>
+                    </div>
+                  </div>
+                  <div className="bg-[#16191e] p-6 rounded-[24px] border border-white/5 shadow-xl">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">Minutos Totales</p>
+                    <div className="flex items-end gap-3">
+                      <p className="text-3xl font-black text-white">{stats.totalMinutes}</p>
+                      <span className="text-white/20 text-xs font-bold mb-1">min</span>
+                    </div>
+                  </div>
+                  <div className="bg-[#16191e] p-6 rounded-[24px] border border-white/5 shadow-xl">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">Costo Acumulado</p>
+                    <div className="flex items-end gap-3">
+                      <p className="text-3xl font-black text-emerald-500">${stats.totalCost.toFixed(3)}</p>
+                      <span className="text-white/20 text-xs font-bold mb-1">USD</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tabla de Historial */}
+                <div className="bg-[#16191e] rounded-[32px] border border-white/5 p-8 shadow-2xl">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+                    <div className="relative flex-1 max-w-md">
+                      <input 
+                        type="text" 
+                        placeholder="Buscar por número o ID..." 
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-sm focus:outline-none focus:border-emerald-500/50 transition-all pl-12"
+                      />
+                      <Activity size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" />
+                    </div>
+                    <button onClick={fetchCalls} className="bg-emerald-500 hover:bg-emerald-600 text-white px-8 py-4 rounded-2xl font-black text-sm transition-all shadow-lg shadow-emerald-500/20">
+                      REFRESCAR LISTA
+                    </button>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-separate border-spacing-y-3">
+                      <thead>
+                        <tr className="text-[10px] font-black uppercase tracking-[0.2em] text-white/20">
+                          <th className="px-6 pb-2">Vecino / ID</th>
+                          <th className="px-6 pb-2">Fecha y Hora</th>
+                          <th className="px-6 pb-2">Duración</th>
+                          <th className="px-6 pb-2">Costo</th>
+                          <th className="px-6 pb-2 text-right">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {calls
+                          .filter(c => c.caller_id.toLowerCase().includes(searchTerm.toLowerCase()) || c.id.toLowerCase().includes(searchTerm.toLowerCase()))
+                          .map((call) => (
+                          <tr 
+                            key={call.id} 
+                            onClick={() => { setSelectedCall(call); fetchTranscripts(call.id); }}
+                            className="group bg-white/[0.02] hover:bg-white/5 transition-all cursor-pointer"
+                          >
+                            <td className="px-6 py-5 rounded-l-2xl border-y border-l border-white/5">
+                              <div className="flex items-center gap-4">
+                                <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center group-hover:bg-emerald-500/20 group-hover:text-emerald-500 transition-all">
+                                  <Phone size={18} />
+                                </div>
+                                <div>
+                                  <p className="font-bold text-sm">{call.caller_id}</p>
+                                  <p className="text-[10px] font-medium text-white/20 tracking-tighter uppercase">{call.id.slice(0,18)}...</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-5 border-y border-white/5">
+                              <p className="text-sm font-medium">{formatDateTime(call.started_at)}</p>
+                            </td>
+                            <td className="px-6 py-5 border-y border-white/5">
+                              <div className="flex items-center gap-2">
+                                <Clock size={14} className="text-white/20" />
+                                <span className="text-sm font-bold">{calculateDuration(call.started_at, call.ended_at)}</span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-5 border-y border-white/5">
+                              <span className="text-sm font-black text-emerald-500">${Number(call.cost).toFixed(4)}</span>
+                            </td>
+                            <td className="px-6 py-5 rounded-r-2xl border-y border-r border-white/5 text-right">
+                              <button className="p-3 bg-white/5 hover:bg-emerald-500 hover:text-white rounded-xl transition-all">
+                                <ChevronRight size={18} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {calls.length === 0 && (
+                      <div className="py-20 text-center text-white/20 italic">No hay registros para mostrar.</div>
+                    )}
+                  </div>
+                </div>
               </motion.div>
             ) : (
               <motion.div key="settings" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="bg-[#16191e] rounded-[32px] border border-white/5 p-12 text-center">
