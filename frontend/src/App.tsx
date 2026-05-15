@@ -370,9 +370,9 @@ function App() {
               </div>
 
               {/* Spending Chart in History Tab */}
-              <div className="bg-white p-8 rounded-[32px] shadow-sm border border-gray-100 min-h-[350px] flex flex-col">
+              <div className="bg-white p-8 rounded-[32px] shadow-sm border border-gray-100 flex flex-col">
                 <h3 className="font-black text-lg mb-6 text-[#2d2d2d]">Análisis de Gastos Diarios</h3>
-                <div className="flex-1 min-h-0">
+                <div className="h-[300px] w-full">
                   <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                     <AreaChart data={stats.spendingByDay}>
                       <defs>
