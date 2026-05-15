@@ -224,7 +224,7 @@ function App() {
           {activeTab === 'dashboard' ? (
             <motion.div key="dash" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="space-y-8">
               {/* Stats Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-6 gap-6">
                 <StatCard label="Total Llamadas" value={stats.total} icon={<Phone size={24} className="text-[#e04f39]" />} trend="+12%" />
                 <StatCard 
                   label="Contestadas" 
@@ -233,14 +233,16 @@ function App() {
                   trend="Real" 
                   isPercent 
                 />
-                <StatCard label="Tpo. Promedio" value={`${stats.avgDurationMins}m`} icon={<Clock size={24} className="text-gray-400" />} trend="Real" />
-                <StatCard label="Tickets Activos" value={tickets.length} icon={<TrendingUp size={24} className="text-green-500" />} trend="High" />
+                <StatCard label="Total Minutos" value={stats.totalMins} icon={<Clock size={24} className="text-blue-500" />} trend="Mins" />
+                <StatCard label="Gasto Total" value={`$${stats.totalCost}`} icon={<TrendingUp size={24} className="text-green-500" />} trend="USD" />
+                <StatCard label="Costo/Min" value={`$${stats.avgCostMin}`} icon={<BarChart3 size={24} className="text-purple-500" />} trend="Avg" />
+                <StatCard label="Tickets Activos" value={tickets.length} icon={<History size={24} className="text-[#e04f39]" />} trend="Auto" />
               </div>
 
               {/* Charts Row */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-1 bg-white p-8 rounded-[32px] shadow-sm border border-gray-100 min-h-[400px] flex flex-col">
-                  <h3 className="font-black text-lg mb-6">Estado de Respuesta</h3>
+                  <h3 className="font-black text-lg mb-6 text-[#2d2d2d]">Estado de Respuesta</h3>
                   <div className="flex-1 min-h-0">
                     <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                       <PieChart>
@@ -255,16 +257,22 @@ function App() {
                 </div>
 
                 <div className="lg:col-span-2 bg-white p-8 rounded-[32px] shadow-sm border border-gray-100 min-h-[400px] flex flex-col">
-                  <h3 className="font-black text-lg mb-6">Volumen Semanal</h3>
+                  <h3 className="font-black text-lg mb-6">Volumen y Gasto</h3>
                   <div className="flex-1 min-h-0">
                     <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                      <BarChart data={stats.byDay}>
+                      <AreaChart data={stats.spendingByDay}>
+                        <defs>
+                          <linearGradient id="colorSpend" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#e04f39" stopOpacity={0.1}/>
+                            <stop offset="95%" stopColor="#e04f39" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
                         <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 'bold'}} />
                         <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 'bold'}} />
-                        <Tooltip cursor={{fill: '#f9fafb'}} />
-                        <Bar dataKey="count" fill="#e04f39" radius={[4, 4, 0, 0]} barSize={40} />
-                      </BarChart>
+                        <Tooltip />
+                        <Area type="monotone" dataKey="spending" stroke="#e04f39" strokeWidth={3} fillOpacity={1} fill="url(#colorSpend)" />
+                      </AreaChart>
                     </ResponsiveContainer>
                   </div>
                 </div>

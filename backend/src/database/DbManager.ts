@@ -181,12 +181,37 @@ export class DbManager {
         FROM calls 
         ${filter} AND ended_at IS NOT NULL
       `);
+
+      // [NUEVO] Métricas Financieras
+      const financialStats = await this.pool.query(`
+        SELECT 
+          SUM(EXTRACT(EPOCH FROM (ended_at - started_at))) / 60 as total_mins,
+          SUM(cost) as total_cost,
+          AVG(CASE WHEN EXTRACT(EPOCH FROM (ended_at - started_at)) > 0 
+              THEN cost / (EXTRACT(EPOCH FROM (ended_at - started_at)) / 60) 
+              ELSE 0 END) as avg_cost_min
+        FROM calls 
+        ${filter} AND ended_at IS NOT NULL
+      `);
+
+      const spendingByDay = await this.pool.query(`
+        SELECT TO_CHAR(started_at, 'YYYY-MM-DD') as day, SUM(cost) as spending
+        FROM calls 
+        ${filter}
+        GROUP BY day 
+        ORDER BY day DESC 
+        LIMIT 7
+      `);
       
       return {
         total: parseInt(totalCalls.rows[0].count),
         answered: parseInt(answeredCalls.rows[0].count),
         avgDurationMins: (parseFloat(avgDuration.rows[0].avg_secs || 0) / 60).toFixed(1),
-        byDay: byDay.rows.reverse()
+        totalMins: parseFloat(financialStats.rows[0].total_mins || 0).toFixed(1),
+        totalCost: parseFloat(financialStats.rows[0].total_cost || 0).toFixed(4),
+        avgCostMin: parseFloat(financialStats.rows[0].avg_cost_min || 0).toFixed(4),
+        byDay: byDay.rows.reverse(),
+        spendingByDay: spendingByDay.rows.reverse()
       };
     } catch (error) {
       console.error('[DB] Error al obtener estadísticas:', error);
