@@ -63,6 +63,16 @@ app.get('/api/tickets', async (req, res) => {
   }
 });
 
+app.post('/api/tickets/:id/status', async (req, res) => {
+  try {
+    const { status } = req.body;
+    await sip.getDb().updateTicketStatus(parseInt(req.params.id), status);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al actualizar ticket' });
+  }
+});
+
 app.post('/api/admin/cleanup', async (req, res) => {
   try {
     await sip.getDb().cleanupAbandonedCalls();

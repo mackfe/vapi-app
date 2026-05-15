@@ -54,6 +54,9 @@ const COLORS = {
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [ticketStatusTab, setTicketStatusTab] = useState('pending');
+  const [priorityFilter, setPriorityFilter] = useState('all');
+  const [selectedTicket, setSelectedTicket] = useState<any>(null);
   const [calls, setCalls] = useState<any[]>([]);
   const [tickets, setTickets] = useState<any[]>([]);
   const [stats, setStats] = useState<any>({ 
@@ -64,7 +67,9 @@ function App() {
     avgDurationMins: 0,
     totalMins: 0,
     totalCost: 0,
-    avgCostMin: 0
+    avgCostMin: 0,
+    ticketStats: { total: 0, pending: 0, in_progress: 0, completed: 0 },
+    ticketsByDay: []
   });
   const [sipStatus, setSipStatus] = useState('connecting');
   const [searchTerm, setSearchTerm] = useState('');
@@ -138,6 +143,21 @@ function App() {
     }
   };
 
+  const updateTicketStatus = async (id: number, status: string) => {
+    try {
+      await fetch(`${API_URL}/api/tickets/${id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      });
+      fetchTickets();
+      fetchStats();
+      setSelectedTicket(null);
+    } catch (e) {
+      console.error('Error updating ticket status');
+    }
+  };
+
   const viewTranscripts = async (call: any) => {
     setSelectedCall(call);
     setIsLoadingTranscripts(true);
@@ -156,9 +176,12 @@ function App() {
     c.caller_id.includes(searchTerm) || c.id.includes(searchTerm)
   );
 
-  const filteredTickets = tickets.filter(t => 
-    t.subject.toLowerCase().includes(searchTerm.toLowerCase()) || t.caller_id.includes(searchTerm)
-  );
+  const filteredTickets = tickets.filter(t => {
+    const matchesSearch = t.subject.toLowerCase().includes(searchTerm.toLowerCase()) || t.caller_id.includes(searchTerm);
+    const matchesStatus = t.status === ticketStatusTab;
+    const matchesPriority = priorityFilter === 'all' || t.priority === priorityFilter;
+    return matchesSearch && matchesStatus && matchesPriority;
+  });
 
   const calculateDuration = (start: string, end: string | null) => {
     if (!end) return 'En curso...';
@@ -314,26 +337,80 @@ function App() {
               </div>
             </motion.div>
           ) : activeTab === 'tickets' ? (
-            <motion.div key="tickets" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
-              <div className="flex gap-4 mb-8">
-                <div className="flex-1 relative">
-                  <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                  <input 
-                    type="text" 
-                    placeholder="Buscar por asunto o número..." 
-                    className="w-full pl-16 pr-6 py-5 bg-white rounded-3xl border-none shadow-sm focus:ring-2 focus:ring-orange-500 font-medium transition-all"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                </div>
-                <button onClick={fetchTickets} className="bg-[#e04f39] text-white px-10 rounded-2xl font-black text-sm shadow-lg shadow-orange-100">
-                  ACTUALIZAR
-                </button>
+            <motion.div key="tickets" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="space-y-8">
+              {/* Ticket Stats */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <StatCard label="Total Tickets" value={stats.ticketStats?.total || 0} icon={<Activity size={24} className="text-blue-500" />} trend="IA" />
+                <StatCard label="Sin Atender" value={stats.ticketStats?.pending || 0} icon={<Clock size={24} className="text-red-500" />} trend="New" />
+                <StatCard label="En Proceso" value={stats.ticketStats?.in_progress || 0} icon={<Activity size={24} className="text-orange-500" />} trend="Work" />
+                <StatCard label="Culminados" value={stats.ticketStats?.completed || 0} icon={<CheckCircle2 size={24} className="text-green-500" />} trend="Done" />
               </div>
 
+              {/* Ticket Activity Chart */}
+              <div className="bg-white p-8 rounded-[32px] shadow-sm border border-gray-100 flex flex-col">
+                <h3 className="font-black text-lg mb-6 text-[#2d2d2d]">Generación de Tickets por Día</h3>
+                <div className="h-[250px] w-full">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                    <AreaChart data={stats.ticketsByDay}>
+                      <defs>
+                        <linearGradient id="colorTickets" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
+                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                      <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 'bold'}} />
+                      <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 'bold'}} />
+                      <Tooltip />
+                      <Area type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorTickets)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Tabs and Filters */}
+              <div className="flex flex-col md:flex-row justify-between items-center gap-6">
+                <div className="flex bg-gray-50 p-1.5 rounded-2xl border border-gray-100">
+                  <button 
+                    onClick={() => setTicketStatusTab('pending')}
+                    className={`px-8 py-3 rounded-xl text-xs font-black transition-all ${ticketStatusTab === 'pending' ? 'bg-white text-[#e04f39] shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                  >
+                    SIN ATENDER
+                  </button>
+                  <button 
+                    onClick={() => setTicketStatusTab('in_progress')}
+                    className={`px-8 py-3 rounded-xl text-xs font-black transition-all ${ticketStatusTab === 'in_progress' ? 'bg-white text-orange-500 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                  >
+                    EN PROCESO
+                  </button>
+                  <button 
+                    onClick={() => setTicketStatusTab('completed')}
+                    className={`px-8 py-3 rounded-xl text-xs font-black transition-all ${ticketStatusTab === 'completed' ? 'bg-white text-green-500 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                  >
+                    CULMINADOS
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Prioridad:</p>
+                  <select 
+                    value={priorityFilter}
+                    onChange={(e) => setPriorityFilter(e.target.value)}
+                    className="bg-white border border-gray-100 rounded-xl px-4 py-2.5 text-xs font-bold focus:ring-2 focus:ring-orange-500 transition-all outline-none"
+                  >
+                    <option value="all">Todas</option>
+                    <option value="urgent">Urgente</option>
+                    <option value="high">Alta</option>
+                    <option value="medium">Media</option>
+                    <option value="low">Baja</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Tickets Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                 {filteredTickets.map(ticket => (
-                  <div key={ticket.id} className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all flex flex-col group">
+                  <div key={ticket.id} onClick={() => setSelectedTicket(ticket)} className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all flex flex-col group cursor-pointer">
                     <div className="flex justify-between items-start mb-6">
                       <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${
                         ticket.priority === 'urgent' ? 'bg-red-100 text-red-600' :
@@ -354,11 +431,17 @@ function App() {
                         </div>
                         <span className="text-xs font-bold">{ticket.caller_id}</span>
                       </div>
-                      <button className="text-[#e04f39] text-xs font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-all">Ver Más</button>
+                      <button className="text-[#e04f39] text-xs font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-all">Ver Detalle</button>
                     </div>
                   </div>
                 ))}
               </div>
+
+              {filteredTickets.length === 0 && (
+                <div className="text-center py-20 bg-gray-50 rounded-[40px] border-2 border-dashed border-gray-100">
+                  <p className="text-gray-400 font-bold">No hay tickets en este estado con los filtros aplicados.</p>
+                </div>
+              )}
             </motion.div>
           ) : activeTab === 'history' ? (
             <motion.div key="history" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
@@ -506,6 +589,68 @@ function App() {
              </div>
              <button onClick={() => setShowCallAlert(false)} className="bg-white text-[#e04f39] px-10 py-5 rounded-[28px] font-black text-sm hover:shadow-xl active:scale-95 transition-all">CONTESTAR</button>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Ticket Details Modal */}
+      <AnimatePresence>
+        {selectedTicket && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-gray-900/40 backdrop-blur-md">
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="bg-white w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden">
+              <div className="p-10 border-b border-gray-100 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
+                    selectedTicket.priority === 'urgent' ? 'bg-red-50 text-red-500' :
+                    selectedTicket.priority === 'high' ? 'bg-orange-50 text-orange-500' :
+                    'bg-blue-50 text-blue-500'
+                  }`}>
+                    <Activity size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-black text-[#2d2d2d] mb-1">Detalle del Ticket</h3>
+                    <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">ID: #{selectedTicket.id} | Llamante: {selectedTicket.caller_id}</p>
+                  </div>
+                </div>
+                <button onClick={() => setSelectedTicket(null)} className="p-3 hover:bg-gray-100 rounded-2xl transition-all"><X /></button>
+              </div>
+              
+              <div className="p-10 space-y-8">
+                <div>
+                  <label className="text-[10px] font-black text-gray-300 uppercase tracking-widest block mb-4">Asunto de la Llamada</label>
+                  <p className="text-xl font-black text-[#2d2d2d] leading-tight">{selectedTicket.subject}</p>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black text-gray-300 uppercase tracking-widest block mb-4">Resumen Inteligente</label>
+                  <p className="text-gray-500 leading-relaxed font-medium bg-gray-50 p-8 rounded-[32px] border border-gray-100 italic">
+                    "{selectedTicket.summary}"
+                  </p>
+                </div>
+
+                <div className="pt-6 border-t border-gray-50 flex flex-col gap-4">
+                  <label className="text-[10px] font-black text-gray-300 uppercase tracking-widest block mb-2">Gestionar Estado</label>
+                  <div className="grid grid-cols-2 gap-4">
+                    {selectedTicket.status !== 'in_progress' && (
+                      <button 
+                        onClick={() => updateTicketStatus(selectedTicket.id, 'in_progress')}
+                        className="bg-orange-50 text-orange-500 px-8 py-5 rounded-2xl font-black text-xs hover:bg-orange-100 transition-all border border-orange-100"
+                      >
+                        MARCAR EN PROCESO
+                      </button>
+                    )}
+                    {selectedTicket.status !== 'completed' && (
+                      <button 
+                        onClick={() => updateTicketStatus(selectedTicket.id, 'completed')}
+                        className="bg-green-50 text-green-500 px-8 py-5 rounded-2xl font-black text-xs hover:bg-green-100 transition-all border border-green-100"
+                      >
+                        MARCAR CULMINADO
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

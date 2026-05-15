@@ -202,6 +202,28 @@ export class DbManager {
         ORDER BY day DESC 
         LIMIT 7
       `);
+
+      // [NUEVO] Estadísticas de Tickets
+      const ticketStats = await this.pool.query(`
+        SELECT 
+          COUNT(*) as total,
+          COUNT(*) FILTER (WHERE status = 'pending') as pending,
+          COUNT(*) FILTER (WHERE status = 'in_progress') as in_progress,
+          COUNT(*) FILTER (WHERE status = 'completed') as completed,
+          COUNT(*) FILTER (WHERE priority = 'urgent') as urgent,
+          COUNT(*) FILTER (WHERE priority = 'high') as high,
+          COUNT(*) FILTER (WHERE priority = 'medium') as medium,
+          COUNT(*) FILTER (WHERE priority = 'low') as low
+        FROM tickets
+      `);
+
+      const ticketsByDay = await this.pool.query(`
+        SELECT TO_CHAR(created_at, 'YYYY-MM-DD') as day, COUNT(*) as count
+        FROM tickets
+        GROUP BY day 
+        ORDER BY day DESC 
+        LIMIT 7
+      `);
       
       return {
         total: parseInt(totalCalls.rows[0].count),
@@ -211,7 +233,9 @@ export class DbManager {
         totalCost: parseFloat(financialStats.rows[0].total_cost || 0).toFixed(4),
         avgCostMin: parseFloat(financialStats.rows[0].avg_cost_min || 0).toFixed(4),
         byDay: byDay.rows.reverse(),
-        spendingByDay: spendingByDay.rows.reverse()
+        spendingByDay: spendingByDay.rows.reverse(),
+        ticketStats: ticketStats.rows[0],
+        ticketsByDay: ticketsByDay.rows.reverse()
       };
     } catch (error) {
       console.error('[DB] Error al obtener estadísticas:', error);
@@ -257,6 +281,14 @@ export class DbManager {
     } catch (error) {
       console.error('[DB] Error al obtener tickets:', error);
       return [];
+    }
+  }
+
+  public async updateTicketStatus(id: number, status: string) {
+    try {
+      await this.pool.query('UPDATE tickets SET status = $1 WHERE id = $2', [status, id]);
+    } catch (error) {
+      console.error('[DB] Error al actualizar ticket:', error);
     }
   }
 }
