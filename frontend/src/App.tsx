@@ -382,6 +382,10 @@ function App() {
                       </div>
                       <div className="flex items-center gap-12">
                         <div className="text-right">
+                          <p className="text-[10px] font-black text-gray-300 uppercase tracking-widest mb-1">Costo</p>
+                          <p className="font-black text-[#e04f39] text-sm">${Number(call.cost || 0).toFixed(4)}</p>
+                        </div>
+                        <div className="text-right">
                           <p className="text-[10px] font-black text-gray-300 uppercase tracking-widest mb-1">Duración</p>
                           <p className="font-bold text-sm">{calculateDuration(call.started_at, call.ended_at)}</p>
                         </div>
