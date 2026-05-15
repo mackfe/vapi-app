@@ -239,10 +239,10 @@ function App() {
 
               {/* Charts Row */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-1 bg-white p-8 rounded-[32px] shadow-sm border border-gray-100 h-[400px] flex flex-col">
+                <div className="lg:col-span-1 bg-white p-8 rounded-[32px] shadow-sm border border-gray-100 min-h-[400px] flex flex-col">
                   <h3 className="font-black text-lg mb-6">Estado de Respuesta</h3>
-                  <div className="flex-1">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className="flex-1 min-h-0">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                       <PieChart>
                         <Pie data={pieData} innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
                           {pieData.map((entry, index) => <Cell key={index} fill={entry.color} />)}
@@ -254,10 +254,10 @@ function App() {
                   </div>
                 </div>
 
-                <div className="lg:col-span-2 bg-white p-8 rounded-[32px] shadow-sm border border-gray-100 h-[400px] flex flex-col">
+                <div className="lg:col-span-2 bg-white p-8 rounded-[32px] shadow-sm border border-gray-100 min-h-[400px] flex flex-col">
                   <h3 className="font-black text-lg mb-6">Volumen Semanal</h3>
-                  <div className="flex-1">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className="flex-1 min-h-0">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                       <BarChart data={stats.byDay}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
                         <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 'bold'}} />
