@@ -24,6 +24,8 @@ import {
   Cell, 
   BarChart, 
   Bar, 
+  AreaChart,
+  Area,
   XAxis, 
   YAxis, 
   CartesianGrid, 
@@ -54,7 +56,16 @@ function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [calls, setCalls] = useState<any[]>([]);
   const [tickets, setTickets] = useState<any[]>([]);
-  const [stats, setStats] = useState<any>({ total: 0, answered: 0, byDay: [], avgDurationMins: 0 });
+  const [stats, setStats] = useState<any>({ 
+    total: 0, 
+    answered: 0, 
+    byDay: [], 
+    spendingByDay: [],
+    avgDurationMins: 0,
+    totalMins: 0,
+    totalCost: 0,
+    avgCostMin: 0
+  });
   const [sipStatus, setSipStatus] = useState('connecting');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCall, setSelectedCall] = useState<any>(null);
