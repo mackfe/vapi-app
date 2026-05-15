@@ -195,7 +195,7 @@ export class DbManager {
       `);
 
       const spendingByDay = await this.pool.query(`
-        SELECT TO_CHAR(started_at, 'YYYY-MM-DD') as day, SUM(cost) as spending
+        SELECT TO_CHAR(started_at, 'YYYY-MM-DD') as day, SUM(cost)::float as spending
         FROM calls 
         ${filter}
         GROUP BY day 
