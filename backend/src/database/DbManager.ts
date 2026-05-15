@@ -59,6 +59,19 @@ export class DbManager {
         );
       `);
 
+      // [NUEVO] Tabla de Tickets AI
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS tickets (
+          id SERIAL PRIMARY KEY,
+          call_id UUID REFERENCES calls(id),
+          subject VARCHAR(255),
+          summary TEXT,
+          priority VARCHAR(20), -- 'low', 'medium', 'high', 'urgent'
+          status VARCHAR(20) DEFAULT 'open',
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+
       console.log('[DB] Tablas verificadas/creadas correctamente.');
     } catch (error) {
       console.error('[DB] Error al inicializar tablas:', error);
@@ -122,13 +135,62 @@ export class DbManager {
 
   public async getCalls() {
     try {
-      const result = await this.pool.query(
-        'SELECT * FROM calls ORDER BY started_at DESC LIMIT 50'
-      );
+      const result = await this.pool.query(`
+        SELECT * FROM calls 
+        WHERE LENGTH(caller_id) >= 7 
+        AND caller_id NOT LIKE '%8888%'
+        AND caller_id NOT LIKE '100%'
+        AND caller_id NOT IN ('admin', 'asterisk', 'sipvicious')
+        ORDER BY started_at DESC 
+        LIMIT 100
+      `);
       return result.rows;
     } catch (error) {
       console.error('[DB] Error al obtener llamadas:', error);
       return [];
+    }
+  }
+
+  public async getStats() {
+    try {
+      const filter = `
+        WHERE LENGTH(caller_id) >= 7 
+        AND caller_id NOT LIKE '%8888%' 
+        AND caller_id NOT LIKE '100%'
+        AND caller_id NOT IN ('admin', 'asterisk', 'sipvicious')
+      `;
+
+      const totalCalls = await this.pool.query(`SELECT COUNT(*) FROM calls ${filter}`);
+      const answeredCalls = await this.pool.query(`
+        SELECT COUNT(DISTINCT c.id) 
+        FROM transcripts t
+        JOIN calls c ON t.call_id = c.id
+        ${filter}
+      `);
+      const byDay = await this.pool.query(`
+        SELECT TO_CHAR(started_at, 'YYYY-MM-DD') as day, COUNT(*) as count 
+        FROM calls 
+        ${filter}
+        GROUP BY day 
+        ORDER BY day DESC 
+        LIMIT 7
+      `);
+      
+      const avgDuration = await this.pool.query(`
+        SELECT AVG(EXTRACT(EPOCH FROM (ended_at - started_at))) as avg_secs 
+        FROM calls 
+        ${filter} AND ended_at IS NOT NULL
+      `);
+      
+      return {
+        total: parseInt(totalCalls.rows[0].count),
+        answered: parseInt(answeredCalls.rows[0].count),
+        avgDurationMins: (parseFloat(avgDuration.rows[0].avg_secs || 0) / 60).toFixed(1),
+        byDay: byDay.rows.reverse()
+      };
+    } catch (error) {
+      console.error('[DB] Error al obtener estadísticas:', error);
+      throw error;
     }
   }
 
@@ -141,6 +203,34 @@ export class DbManager {
       return result.rows;
     } catch (error) {
       console.error('[DB] Error al obtener transcripciones:', error);
+      return [];
+    }
+  }
+
+  // [NUEVO] Métodos para Tickets
+  public async createTicket(callId: string, subject: string, summary: string, priority: string) {
+    try {
+      await this.pool.query(
+        'INSERT INTO tickets (call_id, subject, summary, priority) VALUES ($1, $2, $3, $4)',
+        [callId, subject, summary, priority]
+      );
+      console.log(`[DB] ✅ Ticket creado para la llamada: ${callId}`);
+    } catch (error) {
+      console.error('[DB] ❌ Error al crear ticket:', error);
+    }
+  }
+
+  public async getTickets() {
+    try {
+      const result = await this.pool.query(`
+        SELECT t.*, c.caller_id 
+        FROM tickets t 
+        JOIN calls c ON t.call_id = c.id 
+        ORDER BY t.created_at DESC
+      `);
+      return result.rows;
+    } catch (error) {
+      console.error('[DB] Error al obtener tickets:', error);
       return [];
     }
   }

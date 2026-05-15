@@ -1,715 +1,466 @@
 import React, { useState, useEffect } from 'react';
-import { Phone, Mic, Activity, History, Settings, X, Calendar, Clock, ChevronRight } from 'lucide-react';
+import { 
+  Phone, 
+  BarChart3, 
+  Settings, 
+  History, 
+  Search, 
+  Clock, 
+  User, 
+  ChevronRight, 
+  X, 
+  ArrowUpRight, 
+  CheckCircle2,
+  TrendingUp,
+  Download,
+  Activity,
+  Menu
+} from 'lucide-react';
 import { io } from 'socket.io-client';
 import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  PieChart, 
+  Pie, 
+  Cell, 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  Legend
+} from 'recharts';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://3fbk-cm.deepgaze.xyz';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 const socket = io(API_URL, {
   transports: ['websocket', 'polling'],
-  reconnectionAttempts: 10,
-  reconnectionDelay: 2000,
+  reconnectionAttempts: 5,
+  reconnectionDelay: 1000,
 });
 
-interface Call {
-  id: string;
-  caller_id: string;
-  started_at: string;
-  ended_at: string | null;
-  status: string;
-  cost: number;
-}
-
-interface Transcript {
-  id: number;
-  call_id: string;
-  role: 'user' | 'ai';
-  content: string;
-  created_at: string;
-}
-
-interface LogEntry {
-  msg: string;
-  type: 'error' | 'info' | 'success';
-  time: string;
-}
+// PwC Colors
+const COLORS = {
+  primary: '#e04f39', // Orange
+  secondary: '#ffb600', // Yellow
+  dark: '#2d2d2d',
+  light: '#f3f4f6',
+  white: '#ffffff',
+  textMuted: '#6b7280'
+};
 
 function App() {
-  const [isCalling, setIsCalling] = useState(false);
-  const [callerId, setCallerId] = useState('Desconocido');
-  const [transcription, setTranscription] = useState<string[]>([]);
-  const [isMonitoring, setIsMonitoring] = useState(false);
-  const [showCallAlert, setShowCallAlert] = useState(false);
-  
-  // Estados de UI
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'settings'>('dashboard');
-  const [sipStatus, setSipStatus] = useState<'registered' | 'error' | 'connecting'>('connecting');
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [calls, setCalls] = useState<any[]>([]);
+  const [tickets, setTickets] = useState<any[]>([]);
+  const [stats, setStats] = useState<any>({ total: 0, answered: 0, byDay: [], avgDurationMins: 0 });
+  const [sipStatus, setSipStatus] = useState('connecting');
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeCall, setActiveCall] = useState<string | null>(null);
-
-  // Base de datos real
-  const [calls, setCalls] = useState<Call[]>([]);
-  const [selectedCall, setSelectedCall] = useState<Call | null>(null);
-  const [selectedTranscripts, setSelectedTranscripts] = useState<Transcript[]>([]);
+  const [selectedCall, setSelectedCall] = useState<any>(null);
+  const [selectedTranscripts, setSelectedTranscripts] = useState<any[]>([]);
   const [isLoadingTranscripts, setIsLoadingTranscripts] = useState(false);
-
-  const [logs, setLogs] = useState<LogEntry[]>(() => {
-    const saved = localStorage.getItem('sip_logs');
-    return saved ? JSON.parse(saved) : [];
-  });
-  
-  const [audioCtx] = useState(() => new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 8000 }));
+  const [showCallAlert, setShowCallAlert] = useState(false);
+  const [callerId, setCallerId] = useState('');
 
   useEffect(() => {
     fetchCalls();
-    const interval = setInterval(fetchCalls, 30000);
-    return () => clearInterval(interval);
-  }, []);
+    fetchStats();
+    fetchTickets();
 
-  useEffect(() => {
-    localStorage.setItem('sip_logs', JSON.stringify(logs.slice(-50)));
-  }, [logs]);
-
-  const fetchCalls = async () => {
-    try {
-      const response = await fetch(`${API_URL}/api/calls`);
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || 'Error de servidor');
-      }
-      const data = await response.json();
-      setCalls(data);
-    } catch (error: any) {
-      if (calls.length === 0) {
-        addLog(`Historial: ${error.message || 'Sin conexión'}`, 'error');
-      }
-    }
-  };
-
-  const fetchTranscripts = async (callId: string) => {
-    setIsLoadingTranscripts(true);
-    try {
-      const response = await fetch(`${API_URL}/api/calls/${callId}/transcripts`);
-      const data = await response.json();
-      setSelectedTranscripts(data);
-    } catch (error) {
-      addLog('No se pudo obtener el detalle de la llamada', 'error');
-    } finally {
-      setIsLoadingTranscripts(false);
-    }
-  };
-
-  useEffect(() => {
     socket.on('connect', () => {
       setSipStatus('registered');
-      addLog('Conectado al servidor de monitoreo', 'success');
-    });
-
-    socket.on('disconnect', () => {
-      setSipStatus('error');
-      addLog('Desconectado del servidor', 'error');
     });
 
     socket.on('connect_error', () => {
       setSipStatus('error');
     });
 
-    socket.on('transcription', (text) => {
-      setTranscription((prev) => [...prev, text]);
-    });
-
     socket.on('call-started', (data) => {
-      setIsCalling(true);
+      setCallerId(data.callerId);
       setShowCallAlert(true);
-      setActiveCall(data.callerId || 'Anónimo');
-      setCallerId(data.callerId || 'Anónimo');
-      addLog(`Llamada entrante de ${data.callerId}`, 'success');
       fetchCalls();
     });
 
     socket.on('call-ended', () => {
-      setIsCalling(false);
       setShowCallAlert(false);
-      setActiveCall(null);
-      addLog('Llamada finalizada', 'info');
       fetchCalls();
-    });
-
-    socket.on('sip-error', (data) => {
-      addLog(`Servicio SIP: ${data.message}`, 'error');
-    });
-
-    socket.on('audio-chunk', (chunk: ArrayBuffer) => {
-      if (isMonitoring) {
-        playPcmChunk(chunk);
-      }
+      fetchStats();
+      setTimeout(fetchTickets, 3000);
     });
 
     return () => {
       socket.off('connect');
-      socket.off('disconnect');
       socket.off('connect_error');
-      socket.off('transcription');
       socket.off('call-started');
       socket.off('call-ended');
-      socket.off('sip-error');
-      socket.off('audio-chunk');
     };
-  }, [isMonitoring, callerId]);
+  }, []);
 
-  const addLog = (msg: string, type: 'error' | 'info' | 'success') => {
-    setLogs(prev => {
-      if (prev.length > 0 && prev[0].msg === msg) return prev;
-      return [{ msg, type, time: new Date().toLocaleTimeString() }, ...prev];
-    });
-  };
-
-  const stats = React.useMemo(() => {
-    const totalCalls = calls.length;
-    const totalCost = calls.reduce((acc, c) => acc + Number(c.cost || 0), 0);
-    const totalSeconds = calls.reduce((acc, c) => {
-      if (!c.ended_at) return acc;
-      return acc + (new Date(c.ended_at).getTime() - new Date(c.started_at).getTime()) / 1000;
-    }, 0);
-    const totalMinutes = (totalSeconds / 60).toFixed(1);
-    return { totalCalls, totalCost, totalMinutes };
-  }, [calls]);
-
-  const playPcmChunk = (chunk: ArrayBuffer) => {
-    const int16Array = new Int16Array(chunk);
-    const float32Array = new Float32Array(int16Array.length);
-    for (let i = 0; i < int16Array.length; i++) {
-      float32Array[i] = int16Array[i] / 32768.0;
+  const fetchCalls = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/calls`);
+      const data = await res.json();
+      setCalls(data);
+    } catch (e) {
+      console.error('Error fetching calls');
     }
-    const buffer = audioCtx.createBuffer(1, float32Array.length, 8000);
-    buffer.getChannelData(0).set(float32Array);
-    const source = audioCtx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(audioCtx.destination);
-    source.start();
   };
 
-  const formatDateTime = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return new Intl.DateTimeFormat('es-AR', {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(date);
+  const fetchStats = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/stats`);
+      const data = await res.json();
+      setStats(data);
+    } catch (e) {
+      console.error('Error fetching stats');
+    }
   };
+
+  const fetchTickets = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/tickets`);
+      const data = await res.json();
+      setTickets(data);
+    } catch (e) {
+      console.error('Error fetching tickets');
+    }
+  };
+
+  const viewTranscripts = async (call: any) => {
+    setSelectedCall(call);
+    setIsLoadingTranscripts(true);
+    try {
+      const res = await fetch(`${API_URL}/api/calls/${call.id}/transcripts`);
+      const data = await res.json();
+      setSelectedTranscripts(data);
+    } catch (e) {
+      console.error('Error fetching transcripts');
+    } finally {
+      setIsLoadingTranscripts(false);
+    }
+  };
+
+  const filteredCalls = calls.filter(c => 
+    c.caller_id.includes(searchTerm) || c.id.includes(searchTerm)
+  );
+
+  const filteredTickets = tickets.filter(t => 
+    t.subject.toLowerCase().includes(searchTerm.toLowerCase()) || t.caller_id.includes(searchTerm)
+  );
 
   const calculateDuration = (start: string, end: string | null) => {
     if (!end) return 'En curso...';
-    const s = new Date(start);
-    const e = new Date(end);
-    const diff = Math.floor((e.getTime() - s.getTime()) / 1000);
+    const s = new Date(start).getTime();
+    const e = new Date(end).getTime();
+    const diff = Math.floor((e - s) / 1000);
     const mins = Math.floor(diff / 60);
     const secs = diff % 60;
     return `${mins}m ${secs}s`;
   };
 
+  const pieData = [
+    { name: 'Contestadas', value: stats.answered, color: COLORS.primary },
+    { name: 'Sin Respuesta', value: Math.max(0, stats.total - stats.answered), color: COLORS.secondary },
+  ];
+
   return (
-    <div className="min-h-screen bg-[#0b0d11] text-white font-sans flex overflow-hidden selection:bg-emerald-500/30">
-      <aside className="w-20 lg:w-64 bg-[#111419] border-r border-white/5 flex flex-col p-4 z-50">
-        <div className="flex items-center gap-3 px-4 py-8 mb-4">
-          <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/20">
-            <Activity size={22} className="text-white" />
+    <div className="min-h-screen bg-[#f3f4f6] text-[#2d2d2d] font-sans flex">
+      {/* Sidebar */}
+      <aside className="w-64 bg-white border-r border-gray-200 flex flex-col shadow-sm fixed h-full z-20">
+        <div className="p-8">
+          <div className="flex items-center gap-3 mb-10">
+            <div className="w-10 h-10 bg-[#e04f39] rounded-lg flex items-center justify-center text-white shadow-lg shadow-orange-100">
+              <Phone size={20} strokeWidth={3} />
+            </div>
+            <div>
+              <h1 className="text-xl font-black tracking-tighter leading-none">JOBAAJ</h1>
+              <p className="text-[10px] font-bold text-[#e04f39] uppercase tracking-widest mt-1">Call Center AI</p>
+            </div>
           </div>
-          <div className="hidden lg:block">
-            <h1 className="font-black text-lg tracking-tight leading-tight">Municipio 3F</h1>
-            <p className="text-[10px] text-white/30 uppercase tracking-[0.2em] font-bold">Control AI</p>
-          </div>
+
+          <nav className="space-y-2">
+            <NavItem icon={<BarChart3 size={20} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+            <NavItem icon={<History size={20} />} label="Llamadas" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
+            <NavItem icon={<CheckCircle2 size={20} />} label="Tickets AI" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
+            <NavItem icon={<Settings size={20} />} label="Configuración" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
+          </nav>
         </div>
 
-        <nav className="flex-1 space-y-2">
-          <NavItem 
-            icon={<Activity size={20} />} 
-            label="Panel Principal" 
-            active={activeTab === 'dashboard'} 
-            onClick={() => setActiveTab('dashboard')} 
-          />
-          <NavItem 
-            icon={<History size={20} />} 
-            label="Llamadas" 
-            active={activeTab === 'history'} 
-            onClick={() => setActiveTab('history')} 
-          />
-          <NavItem 
-            icon={<Settings size={20} />} 
-            label="Configuración" 
-            active={activeTab === 'settings'} 
-            onClick={() => setActiveTab('settings')} 
-          />
-        </nav>
-
-        <div className="mt-auto space-y-4">
-          <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
-            <p className="text-[10px] text-white/30 uppercase font-bold mb-3 tracking-widest">Monitor de Audio</p>
-            <button 
-              onClick={() => {
-                if (audioCtx.state === 'suspended') audioCtx.resume();
-                setIsMonitoring(!isMonitoring);
-              }}
-              className={`w-full py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                isMonitoring 
-                  ? 'bg-red-500/20 text-red-400 border border-red-500/20' 
-                  : 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 hover:scale-[1.02]'
-              }`}
-            >
-              {isMonitoring ? 'Detener Escucha' : 'Escuchar Llamada'}
-            </button>
-          </div>
-
-          <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
-            <p className="text-[10px] text-white/30 uppercase font-bold mb-3 tracking-widest">Estado SIP</p>
-            <div className="flex items-center gap-3">
-              <div className={`w-2 h-2 rounded-full animate-pulse ${
-                sipStatus === 'registered' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]' : 'bg-red-500'
-              }`} />
-              <span className="text-xs font-bold text-white/80">
-                {sipStatus === 'registered' ? 'Sistema Activo' : 'Error de Conexión'}
-              </span>
+        <div className="mt-auto p-6 border-t border-gray-50">
+          <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-2xl">
+            <div className={`w-2.5 h-2.5 rounded-full ${sipStatus === 'registered' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+            <div>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Estado SIP</p>
+              <p className="text-xs font-black uppercase">{sipStatus === 'registered' ? 'Activo' : 'Error'}</p>
             </div>
           </div>
         </div>
       </aside>
 
-      <main className="flex-1 relative overflow-y-auto bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.05),_transparent_40%)] custom-scrollbar">
-        <header className="p-8 pb-0">
-          <div className="flex justify-between items-end">
-            <div>
-              <h2 className="text-3xl font-black tracking-tight mb-1">
-                {activeTab === 'dashboard' ? 'Centro de Control' : 
-                 activeTab === 'history' ? 'Historial de Llamadas' : 'Configuración'}
-              </h2>
-            </div>
-            <div className="flex items-center gap-2 bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-full border border-emerald-500/20 text-xs font-bold">
-              <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping" />
-              {sipStatus === 'registered' ? 'Sincronizado' : 'Reconectando...'}
+      {/* Content */}
+      <main className="flex-1 ml-64 p-10 overflow-y-auto">
+        <header className="flex justify-between items-center mb-10">
+          <div>
+            <h2 className="text-3xl font-black tracking-tight">
+              {activeTab === 'dashboard' ? 'Centro de Control' : 
+               activeTab === 'tickets' ? 'Módulo de Tickets AI' : 
+               activeTab === 'history' ? 'Historial de Llamadas' : 'Ajustes'}
+            </h2>
+            <p className="text-gray-500 font-medium">Gestionando inteligencia operativa en tiempo real.</p>
+          </div>
+          <div className="flex gap-4">
+            <button className="bg-white px-6 py-3 rounded-xl border border-gray-200 text-sm font-bold shadow-sm hover:bg-gray-50 flex items-center gap-2">
+              <Download size={18} /> Exportar
+            </button>
+            <div className="bg-[#e04f39] text-white px-6 py-3 rounded-xl shadow-lg shadow-orange-100 flex items-center gap-3">
+              <User size={18} />
+              <span className="font-bold text-sm tracking-tight">Administrador</span>
             </div>
           </div>
         </header>
 
-        <div className="p-8">
-          <AnimatePresence mode="wait">
-            {activeTab === 'dashboard' ? (
-              <motion.div 
-                key="dashboard"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="grid grid-cols-1 xl:grid-cols-3 gap-8"
-              >
-                <div className="xl:col-span-2 space-y-8">
-                  <section className="bg-[#16191e] rounded-[32px] border border-white/5 overflow-hidden shadow-2xl">
-                    <div className="p-6 bg-white/5 flex items-center justify-between border-b border-white/5">
-                      <div className="flex items-center gap-4">
-                        <div className={`p-3 rounded-2xl ${isCalling ? 'bg-red-500/20 text-red-500' : 'bg-white/5 text-white/40'}`}>
-                          <Phone size={24} className={isCalling ? 'animate-pulse' : ''} />
-                        </div>
-                        <div>
-                          <h3 className="font-bold text-lg">{isCalling ? 'Llamada Activa' : 'Esperando consultas...'}</h3>
-                          <p className="text-xs text-white/30 font-medium">
-                            {isCalling ? `Conectado con: ${callerId}` : 'IA operando con Base Municipal'}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="p-8 min-h-[400px] flex flex-col items-center justify-center relative">
-                      {!isCalling ? (
-                        <div className="text-center group cursor-default">
-                          <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-6 group-hover:bg-white/10 transition-colors">
-                            <Mic size={32} className="text-white/10 group-hover:text-white/20" />
-                          </div>
-                          <p className="text-white/20 font-medium max-w-[200px]">Las transcripciones aparecerán aquí en tiempo real</p>
-                        </div>
-                      ) : (
-                        <div className="w-full space-y-4">
-                          {transcription.map((line, idx) => (
-                            <motion.div 
-                              initial={{ opacity: 0, x: -10 }}
-                              animate={{ opacity: 1, x: 0 }}
-                              key={idx} 
-                              className="bg-white/5 p-4 rounded-2xl border border-white/5 text-sm leading-relaxed"
-                            >
-                              {line}
-                            </motion.div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </section>
+        <AnimatePresence mode="wait">
+          {activeTab === 'dashboard' ? (
+            <motion.div key="dash" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="space-y-8">
+              {/* Stats Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <StatCard label="Total Llamadas" value={stats.total} icon={<Phone size={24} className="text-[#e04f39]" />} trend="+12%" />
+                <StatCard 
+                  label="Contestadas" 
+                  value={stats.total > 0 ? ((stats.answered / stats.total) * 100).toFixed(1) : 0} 
+                  icon={<CheckCircle2 size={24} className="text-[#ffb600]" />} 
+                  trend="Real" 
+                  isPercent 
+                />
+                <StatCard label="Tpo. Promedio" value={`${stats.avgDurationMins}m`} icon={<Clock size={24} className="text-gray-400" />} trend="Real" />
+                <StatCard label="Tickets Activos" value={tickets.length} icon={<TrendingUp size={24} className="text-green-500" />} trend="High" />
+              </div>
 
-                  <section className="space-y-4">
-                    <h3 className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-white/40 px-2">
-                      <Activity size={14} className="text-emerald-500" />
-                      Registro de Eventos
-                    </h3>
-                    <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                      <AnimatePresence initial={false}>
-                        {logs.map((log, idx) => (
-                          <motion.div 
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: 'auto' }}
-                            key={idx}
-                            className={`flex items-center justify-between p-4 rounded-2xl border text-sm transition-all ${
-                              log.type === 'error' ? 'bg-red-500/10 border-red-500/10 text-red-400' :
-                              log.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/10 text-emerald-400' :
-                              'bg-white/5 border-white/5 text-white/60'
-                            }`}
-                          >
-                            <div className="flex items-center gap-3">
-                              <div className={`w-1.5 h-1.5 rounded-full ${
-                                log.type === 'error' ? 'bg-red-400' :
-                                log.type === 'success' ? 'bg-emerald-400' : 'bg-white/30'
-                              }`} />
-                              <span className="font-medium">{log.msg}</span>
-                            </div>
-                            <span className="text-[10px] font-bold opacity-30">{log.time}</span>
-                          </motion.div>
-                        ))}
-                      </AnimatePresence>
-                    </div>
-                  </section>
-                </div>
-
-                <div className="space-y-6">
-                   <section className="bg-[#16191e] rounded-[32px] border border-white/5 overflow-hidden flex flex-col h-[700px] shadow-2xl">
-                      <div className="p-6 bg-white/5 border-b border-white/5 flex items-center justify-between">
-                        <h3 className="flex items-center gap-3 font-bold">
-                          <History size={18} className="text-emerald-500" />
-                          Historial Reciente
-                        </h3>
-                        <button onClick={fetchCalls} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/40">
-                          <Activity size={14} />
-                        </button>
-                      </div>
-                      
-                      <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                        {calls.length === 0 ? (
-                          <div className="py-20 text-center text-white/20 italic">Cargando base de datos...</div>
-                        ) : (
-                          <>
-                            {calls.slice(0, 8).map((call) => (
-                              <motion.div 
-                                key={call.id}
-                                whileHover={{ scale: 1.02 }}
-                                onClick={() => {
-                                  setSelectedCall(call);
-                                  fetchTranscripts(call.id);
-                                }}
-                                className="group p-4 bg-white/[0.02] hover:bg-white/5 rounded-[24px] border border-white/5 cursor-pointer transition-all"
-                              >
-                                <div className="flex items-center justify-between mb-2">
-                                  <span className="text-xs font-black text-white/90">{call.caller_id}</span>
-                                  <span className="text-[9px] font-bold text-white/20 uppercase">{calculateDuration(call.started_at, call.ended_at)}</span>
-                                </div>
-                                <div className="flex items-center justify-between text-[10px] text-white/30 font-bold uppercase">
-                                  <span>{formatDateTime(call.started_at)}</span>
-                                  {call.cost > 0 && <span className="text-emerald-500">${Number(call.cost).toFixed(4)}</span>}
-                                </div>
-                              </motion.div>
-                            ))}
-                            <button 
-                              onClick={() => setActiveTab('history')}
-                              className="w-full py-4 text-[10px] font-black uppercase tracking-[0.2em] text-emerald-500 hover:bg-emerald-500/5 rounded-2xl transition-all"
-                            >
-                              Ver todo el historial
-                            </button>
-                          </>
-                        )}
-                      </div>
-                   </section>
-                </div>
-              </motion.div>
-            ) : activeTab === 'history' ? (
-              <motion.div 
-                key="history" 
-                initial={{ opacity: 0, y: 10 }} 
-                animate={{ opacity: 1, y: 0 }} 
-                exit={{ opacity: 0, y: -10 }} 
-                className="space-y-6"
-              >
-                {/* Panel de Métricas */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="bg-[#16191e] p-6 rounded-[24px] border border-white/5 shadow-xl">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">Total Llamadas</p>
-                    <div className="flex items-end gap-3">
-                      <p className="text-3xl font-black text-white">{stats.totalCalls}</p>
-                      <span className="text-emerald-500 text-xs font-bold mb-1">↑ Activo</span>
-                    </div>
-                  </div>
-                  <div className="bg-[#16191e] p-6 rounded-[24px] border border-white/5 shadow-xl">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">Minutos Totales</p>
-                    <div className="flex items-end gap-3">
-                      <p className="text-3xl font-black text-white">{stats.totalMinutes}</p>
-                      <span className="text-white/20 text-xs font-bold mb-1">min</span>
-                    </div>
-                  </div>
-                  <div className="bg-[#16191e] p-6 rounded-[24px] border border-white/5 shadow-xl">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-2">Costo Acumulado</p>
-                    <div className="flex items-end gap-3">
-                      <p className="text-3xl font-black text-emerald-500">${stats.totalCost.toFixed(3)}</p>
-                      <span className="text-white/20 text-xs font-bold mb-1">USD</span>
-                    </div>
+              {/* Charts Row */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-1 bg-white p-8 rounded-[32px] shadow-sm border border-gray-100 h-[400px] flex flex-col">
+                  <h3 className="font-black text-lg mb-6">Estado de Respuesta</h3>
+                  <div className="flex-1">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={pieData} innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+                          {pieData.map((entry, index) => <Cell key={index} fill={entry.color} />)}
+                        </Pie>
+                        <Tooltip />
+                        <Legend verticalAlign="bottom" height={36}/>
+                      </PieChart>
+                    </ResponsiveContainer>
                   </div>
                 </div>
 
-                {/* Tabla de Historial */}
-                <div className="bg-[#16191e] rounded-[32px] border border-white/5 p-8 shadow-2xl">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
-                    <div className="relative flex-1 max-w-md">
-                      <input 
-                        type="text" 
-                        placeholder="Buscar por número o ID..." 
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full bg-white/5 border border-white/10 rounded-2xl px-6 py-4 text-sm focus:outline-none focus:border-emerald-500/50 transition-all pl-12"
-                      />
-                      <Activity size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" />
-                    </div>
-                    <button onClick={fetchCalls} className="bg-emerald-500 hover:bg-emerald-600 text-white px-8 py-4 rounded-2xl font-black text-sm transition-all shadow-lg shadow-emerald-500/20">
-                      REFRESCAR LISTA
-                    </button>
+                <div className="lg:col-span-2 bg-white p-8 rounded-[32px] shadow-sm border border-gray-100 h-[400px] flex flex-col">
+                  <h3 className="font-black text-lg mb-6">Volumen Semanal</h3>
+                  <div className="flex-1">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={stats.byDay}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                        <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 'bold'}} />
+                        <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: 'bold'}} />
+                        <Tooltip cursor={{fill: '#f9fafb'}} />
+                        <Bar dataKey="count" fill="#e04f39" radius={[4, 4, 0, 0]} barSize={40} />
+                      </BarChart>
+                    </ResponsiveContainer>
                   </div>
+                </div>
+              </div>
 
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-separate border-spacing-y-3">
-                      <thead>
-                        <tr className="text-[10px] font-black uppercase tracking-[0.2em] text-white/20">
-                          <th className="px-6 pb-2">Vecino / ID</th>
-                          <th className="px-6 pb-2">Fecha y Hora</th>
-                          <th className="px-6 pb-2">Duración</th>
-                          <th className="px-6 pb-2">Costo</th>
-                          <th className="px-6 pb-2 text-right">Acciones</th>
+              {/* Recent Activity Table */}
+              <div className="bg-white rounded-[32px] shadow-sm border border-gray-100 overflow-hidden">
+                <div className="p-8 border-b border-gray-50 flex justify-between items-center">
+                  <h3 className="font-black text-lg">Actividad Reciente</h3>
+                  <button onClick={() => setActiveTab('history')} className="text-[#e04f39] font-bold text-sm flex items-center gap-1 hover:gap-2 transition-all">
+                    Ver Todo <ChevronRight size={16} />
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="bg-gray-50 text-[10px] font-black uppercase tracking-widest text-gray-400">
+                        <th className="px-8 py-4">Llamante</th>
+                        <th className="px-8 py-4">Fecha</th>
+                        <th className="px-8 py-4">Duración</th>
+                        <th className="px-8 py-4 text-right">Costo</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {calls.slice(0, 5).map(call => (
+                        <tr key={call.id} className="hover:bg-gray-50/50 transition-colors">
+                          <td className="px-8 py-5 font-bold">{call.caller_id}</td>
+                          <td className="px-8 py-5 text-sm text-gray-500">{new Date(call.started_at).toLocaleString()}</td>
+                          <td className="px-8 py-5 text-sm font-medium">{calculateDuration(call.started_at, call.ended_at)}</td>
+                          <td className="px-8 py-5 text-right font-black text-[#e04f39]">${Number(call.cost).toFixed(4)}</td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {calls
-                          .filter(c => c.caller_id.toLowerCase().includes(searchTerm.toLowerCase()) || c.id.toLowerCase().includes(searchTerm.toLowerCase()))
-                          .map((call) => (
-                          <tr 
-                            key={call.id} 
-                            onClick={() => { setSelectedCall(call); fetchTranscripts(call.id); }}
-                            className="group bg-white/[0.02] hover:bg-white/5 transition-all cursor-pointer"
-                          >
-                            <td className="px-6 py-5 rounded-l-2xl border-y border-l border-white/5">
-                              <div className="flex items-center gap-4">
-                                <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center group-hover:bg-emerald-500/20 group-hover:text-emerald-500 transition-all">
-                                  <Phone size={18} />
-                                </div>
-                                <div>
-                                  <p className="font-bold text-sm">{call.caller_id}</p>
-                                  <p className="text-[10px] font-medium text-white/20 tracking-tighter uppercase">{call.id.slice(0,18)}...</p>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-5 border-y border-white/5">
-                              <p className="text-sm font-medium">{formatDateTime(call.started_at)}</p>
-                            </td>
-                            <td className="px-6 py-5 border-y border-white/5">
-                              <div className="flex items-center gap-2">
-                                <Clock size={14} className="text-white/20" />
-                                <span className="text-sm font-bold">{calculateDuration(call.started_at, call.ended_at)}</span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-5 border-y border-white/5">
-                              <span className="text-sm font-black text-emerald-500">${Number(call.cost).toFixed(4)}</span>
-                            </td>
-                            <td className="px-6 py-5 rounded-r-2xl border-y border-r border-white/5 text-right">
-                              <button className="p-3 bg-white/5 hover:bg-emerald-500 hover:text-white rounded-xl transition-all">
-                                <ChevronRight size={18} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {calls.length === 0 && (
-                      <div className="py-20 text-center text-white/20 italic">No hay registros para mostrar.</div>
-                    )}
-                  </div>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              </motion.div>
-            ) : (
-              <motion.div key="settings" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="bg-[#16191e] rounded-[32px] border border-white/5 p-12 text-center">
-                <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-6">
-                   <Settings size={40} className="text-white/20" />
+              </div>
+            </motion.div>
+          ) : activeTab === 'tickets' ? (
+            <motion.div key="tickets" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
+              <div className="flex gap-4 mb-8">
+                <div className="flex-1 relative">
+                  <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                  <input 
+                    type="text" 
+                    placeholder="Buscar por asunto o número..." 
+                    className="w-full pl-16 pr-6 py-5 bg-white rounded-3xl border-none shadow-sm focus:ring-2 focus:ring-orange-500 font-medium transition-all"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
                 </div>
-                <h3 className="text-xl font-bold mb-2">Configuración del Sistema</h3>
-                <p className="text-white/40 mb-8 max-w-md mx-auto">Panel de ajustes globales y mantenimiento de base de datos.</p>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto text-left">
-                  {/* Card: Servicios */}
-                  <div className="bg-white/5 p-8 rounded-[32px] border border-white/5">
-                    <p className="text-[10px] font-black uppercase text-white/20 mb-6 tracking-widest">Estado de Servicios</p>
-                    <div className="space-y-6">
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm font-medium">Socket.io (Realtime)</span>
-                        <div className="flex items-center gap-2">
-                          <div className={`w-1.5 h-1.5 rounded-full ${sipStatus === 'registered' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
-                          <span className={sipStatus === 'registered' ? 'text-emerald-400 font-black text-xs' : 'text-red-400 font-black text-xs'}>
-                            {sipStatus === 'registered' ? 'CONECTADO' : 'FALLO / BLOCKED'}
-                          </span>
-                        </div>
-                      </div>
-                      {sipStatus !== 'registered' && (
-                        <div className="p-4 bg-red-500/10 rounded-2xl border border-red-500/20">
-                          <p className="text-[10px] text-red-400 leading-relaxed font-bold">
-                            ⚠️ ERROR DE WEBSOCKET DETECTADO
-                          </p>
-                          <p className="text-[10px] text-red-400/60 leading-relaxed italic mt-1">
-                            El administrador debe habilitar "Upgrade" y "Connection" en el proxy Nginx para permitir el tráfico en tiempo real.
-                          </p>
-                        </div>
-                      )}
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm font-medium">Base de Datos (REST)</span>
-                        <span className="text-emerald-400 font-black text-xs">ONLINE</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Card: Mantenimiento */}
-                  <div className="bg-white/5 p-8 rounded-[32px] border border-white/5">
-                    <p className="text-[10px] font-black uppercase text-white/20 mb-6 tracking-widest">Mantenimiento</p>
-                    <div className="space-y-4">
-                      <button 
-                        onClick={async () => {
-                          try {
-                            const res = await fetch(`${API_URL}/api/admin/cleanup`, { method: 'POST' });
-                            if (res.ok) {
-                              addLog('Limpieza de llamadas completada', 'success');
-                              fetchCalls();
-                            }
-                          } catch (e) {
-                            addLog('Error al ejecutar limpieza', 'error');
-                          }
-                        }}
-                        className="w-full py-4 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 rounded-2xl text-xs font-black transition-all border border-emerald-500/20 uppercase tracking-widest"
-                      >
-                        Limpiar Llamadas "En Curso"
-                      </button>
-                      <p className="text-[10px] text-white/20 leading-relaxed">
-                        Esta acción cierra automáticamente cualquier llamada que haya quedado abierta por más de 30 minutos debido a reinicios del sistema.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-12 flex items-center justify-center gap-4 text-[10px] font-bold text-white/10 uppercase tracking-widest">
-                  <span>API Endpoint:</span>
-                  <span className="font-mono">{API_URL}</span>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      </main>
-
-
-      {/* Transcript Detail Modal */}
-      <AnimatePresence>
-        {selectedCall && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSelectedCall(null)}
-              className="absolute inset-0 bg-black/90 backdrop-blur-md"
-            />
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-[#1c2128] w-full max-w-2xl rounded-[40px] border border-white/10 shadow-2xl relative z-10 overflow-hidden flex flex-col max-h-[85vh]"
-            >
-              <div className="p-8 border-b border-white/5 flex items-center justify-between bg-white/5">
-                <div>
-                  <h3 className="text-2xl font-black tracking-tight text-emerald-500 mb-1">Detalle de Llamada</h3>
-                  <p className="text-xs text-white/40 font-bold uppercase tracking-widest">{selectedCall.caller_id} • {formatDateTime(selectedCall.started_at)}</p>
-                </div>
-                <button 
-                  onClick={() => setSelectedCall(null)}
-                  className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl transition-colors"
-                >
-                  <X size={24} />
+                <button onClick={fetchTickets} className="bg-[#e04f39] text-white px-10 rounded-2xl font-black text-sm shadow-lg shadow-orange-100">
+                  ACTUALIZAR
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-[#0f1115]/30 custom-scrollbar">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                {filteredTickets.map(ticket => (
+                  <div key={ticket.id} className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all flex flex-col group">
+                    <div className="flex justify-between items-start mb-6">
+                      <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                        ticket.priority === 'urgent' ? 'bg-red-100 text-red-600' :
+                        ticket.priority === 'high' ? 'bg-orange-100 text-orange-600' :
+                        ticket.priority === 'medium' ? 'bg-yellow-100 text-yellow-600' :
+                        'bg-blue-100 text-blue-600'
+                      }`}>
+                        {ticket.priority}
+                      </span>
+                      <span className="text-[10px] font-bold text-gray-300">{new Date(ticket.created_at).toLocaleDateString()}</span>
+                    </div>
+                    <h4 className="text-xl font-black mb-3 line-clamp-2 leading-tight">{ticket.subject}</h4>
+                    <p className="text-gray-500 text-sm mb-6 line-clamp-4 leading-relaxed font-medium">{ticket.summary}</p>
+                    <div className="mt-auto pt-6 border-t border-gray-50 flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 bg-gray-50 rounded-full flex items-center justify-center text-gray-400">
+                          <User size={14} />
+                        </div>
+                        <span className="text-xs font-bold">{ticket.caller_id}</span>
+                      </div>
+                      <button className="text-[#e04f39] text-xs font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-all">Ver Más</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          ) : activeTab === 'history' ? (
+            <motion.div key="history" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
+              <div className="bg-white p-8 rounded-[32px] shadow-sm border border-gray-100">
+                <div className="flex gap-4 mb-8">
+                  <div className="flex-1 relative">
+                    <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                    <input 
+                      type="text" 
+                      placeholder="Buscar por número..." 
+                      className="w-full pl-16 pr-6 py-5 bg-gray-50 rounded-2xl border-none focus:ring-2 focus:ring-orange-500 font-medium transition-all"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </div>
+                  <button onClick={fetchCalls} className="bg-[#e04f39] text-white px-10 rounded-2xl font-black text-sm shadow-lg shadow-orange-100">
+                    REFRESCAR
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  {filteredCalls.map(call => (
+                    <div key={call.id} onClick={() => viewTranscripts(call)} className="group flex items-center justify-between p-6 bg-white border border-gray-100 rounded-3xl hover:border-orange-200 hover:shadow-lg hover:shadow-gray-100 transition-all cursor-pointer">
+                      <div className="flex items-center gap-6">
+                        <div className="w-14 h-14 bg-gray-50 rounded-2xl flex items-center justify-center text-gray-400 group-hover:text-[#e04f39] group-hover:bg-orange-50 transition-all">
+                          <Phone size={24} />
+                        </div>
+                        <div>
+                          <p className="font-black text-lg">{call.caller_id}</p>
+                          <p className="text-xs text-gray-400 font-bold">{new Date(call.started_at).toLocaleString()}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-12">
+                        <div className="text-right">
+                          <p className="text-[10px] font-black text-gray-300 uppercase tracking-widest mb-1">Duración</p>
+                          <p className="font-bold text-sm">{calculateDuration(call.started_at, call.ended_at)}</p>
+                        </div>
+                        <ChevronRight className="text-gray-200 group-hover:text-orange-500 transition-all" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div key="settings" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white p-16 rounded-[40px] text-center border border-gray-100">
+              <Settings size={80} className="mx-auto text-gray-100 mb-8" />
+              <h3 className="text-3xl font-black mb-4">Configuración</h3>
+              <p className="text-gray-400 max-w-sm mx-auto mb-10">Ajustes globales del sistema de telefonía e inteligencia artificial.</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl mx-auto text-left">
+                <div className="p-8 bg-gray-50 rounded-[32px] border border-gray-100">
+                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-4">Infraestructura</p>
+                   <div className="flex justify-between items-center">
+                     <span className="font-bold text-sm">SIP Server</span>
+                     <span className="text-green-500 font-black text-xs">CONECTADO</span>
+                   </div>
+                </div>
+                <div className="p-8 bg-gray-50 rounded-[32px] border border-gray-100">
+                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-4">Motor AI</p>
+                   <div className="flex justify-between items-center">
+                     <span className="font-bold text-sm">GPT-4 / Groq</span>
+                     <span className="text-green-500 font-black text-xs">ONLINE</span>
+                   </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+
+      {/* Modal Transcripts */}
+      <AnimatePresence>
+        {selectedCall && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-gray-900/40 backdrop-blur-md">
+            <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }} className="bg-white w-full max-w-3xl rounded-[40px] shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+              <div className="p-8 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                  <h3 className="text-2xl font-black text-[#2d2d2d] mb-1">Transcripción Detallada</h3>
+                  <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">{selectedCall.caller_id}</p>
+                </div>
+                <button onClick={() => setSelectedCall(null)} className="p-3 hover:bg-gray-100 rounded-2xl transition-all"><X /></button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-gray-50/50">
                 {isLoadingTranscripts ? (
                   <div className="h-64 flex items-center justify-center">
-                    <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-                  </div>
-                ) : selectedTranscripts.length === 0 ? (
-                  <div className="text-center py-20">
-                    <p className="text-white/20 italic">No se encontraron transcripciones registradas.</p>
+                    <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
                   </div>
                 ) : (
-                  selectedTranscripts.map((t) => (
-                    <div key={t.id} className={`flex flex-col ${t.role === 'user' ? 'items-start' : 'items-end'}`}>
-                      <div className="flex items-center gap-2 mb-2 px-2">
-                        <span className={`text-[10px] font-black uppercase tracking-widest ${t.role === 'user' ? 'text-emerald-500' : 'text-white/40'}`}>
-                          {t.role === 'user' ? 'Vecino' : 'IA Municipio'}
-                        </span>
-                      </div>
-                      <div className={`p-5 rounded-[24px] max-w-[85%] text-sm leading-relaxed shadow-sm ${
-                        t.role === 'user' 
-                          ? 'bg-emerald-600/20 border border-emerald-500/10 text-white/90 rounded-tl-none' 
-                          : 'bg-white/5 border border-white/10 text-white/80 rounded-tr-none'
-                      }`}>
+                  selectedTranscripts.map((t, i) => (
+                    <div key={i} className={`flex flex-col ${t.role === 'user' ? 'items-start' : 'items-end'}`}>
+                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 px-2">{t.role === 'user' ? 'Vecino' : 'IA Municipio'}</span>
+                      <div className={`p-6 rounded-[32px] max-w-[80%] text-sm leading-relaxed ${t.role === 'user' ? 'bg-white border border-gray-200 text-gray-700 rounded-tl-none shadow-sm' : 'bg-[#e04f39] text-white rounded-tr-none shadow-lg shadow-orange-100'}`}>
                         {t.content}
                       </div>
                     </div>
                   ))
                 )}
               </div>
-
-              <div className="p-8 border-t border-white/5 bg-white/5 flex justify-between items-center">
-                <div className="text-xs font-bold text-white/20 uppercase tracking-widest">
-                  ID: {selectedCall.id.slice(0,8)}...
-                </div>
-                <button 
-                  onClick={() => setSelectedCall(null)}
-                  className="px-8 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl text-sm font-black transition-all shadow-lg shadow-emerald-500/20"
-                >
-                  VOLVER
-                </button>
-              </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
-      {/* Floating Call Alert */}
+      {/* Incoming Call Alert */}
       <AnimatePresence>
         {showCallAlert && (
-          <motion.div 
-            initial={{ y: 100, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 100, opacity: 0 }}
-            className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[150] bg-emerald-600 p-2 rounded-[32px] shadow-[0_20px_50px_rgba(16,185,129,0.3)] flex items-center gap-6 border border-white/20"
-          >
-            <div className="bg-white/20 p-4 rounded-[24px] ml-1">
-              <Phone size={28} className="animate-bounce" />
-            </div>
-            <div>
-              <p className="text-[10px] uppercase font-black tracking-[0.2em] text-white/60 mb-1">Entrante</p>
-              <p className="text-lg font-black text-white">{callerId}</p>
-            </div>
-            <button 
-              onClick={() => {
-                if (audioCtx.state === 'suspended') audioCtx.resume();
-                setIsMonitoring(true);
-                setShowCallAlert(false);
-              }}
-              className="bg-white text-emerald-600 px-8 py-4 rounded-[24px] font-black text-sm hover:bg-emerald-50 transition-all active:scale-95 mr-1 shadow-lg"
-            >
-              MONITORIZAR
-            </button>
+          <motion.div initial={{ y: 100 }} animate={{ y: 0 }} exit={{ y: 100 }} className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[150] bg-[#e04f39] p-6 rounded-[40px] shadow-2xl flex items-center gap-8 text-white border border-white/20">
+             <div className="w-16 h-16 bg-white/20 rounded-[28px] flex items-center justify-center animate-bounce"><Phone size={32} /></div>
+             <div>
+               <p className="text-xs font-black uppercase tracking-[0.2em] opacity-60 mb-1">Llamada Entrante</p>
+               <p className="text-2xl font-black">{callerId}</p>
+             </div>
+             <button onClick={() => setShowCallAlert(false)} className="bg-white text-[#e04f39] px-10 py-5 rounded-[28px] font-black text-sm hover:shadow-xl active:scale-95 transition-all">CONTESTAR</button>
           </motion.div>
         )}
       </AnimatePresence>
@@ -717,16 +468,25 @@ function App() {
   );
 }
 
-function NavItem({ icon, label, active = false, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick: () => void }) {
+function NavItem({ icon, label, active, onClick }: any) {
   return (
-    <div 
-      onClick={onClick}
-      className={`
-      flex items-center gap-4 px-4 py-4 rounded-2xl cursor-pointer transition-all duration-300
-      ${active ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : 'text-white/20 hover:text-white hover:bg-white/5'}
-    `}>
-      {icon}
-      <span className="font-bold text-sm hidden lg:block tracking-tight">{label}</span>
+    <div onClick={onClick} className={`flex items-center gap-4 px-6 py-4 rounded-2xl cursor-pointer transition-all ${active ? 'bg-orange-50 text-[#e04f39] font-black' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'}`}>
+      {icon}<span className="text-sm font-bold tracking-tight">{label}</span>
+    </div>
+  );
+}
+
+function StatCard({ label, value, icon, trend, isPercent }: any) {
+  return (
+    <div className="bg-white p-8 rounded-[32px] shadow-sm border border-gray-100 flex flex-col justify-between hover:shadow-md transition-all">
+      <div className="flex justify-between items-start mb-6">
+        <div className="p-4 bg-gray-50 rounded-2xl">{icon}</div>
+        <span className={`text-[10px] font-black px-2 py-1 rounded-lg ${trend.includes('+') || isPercent ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{trend}</span>
+      </div>
+      <div>
+        <p className="text-4xl font-black tracking-tighter mb-1">{value}{isPercent && '%'}</p>
+        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-none">{label}</p>
+      </div>
     </div>
   );
 }

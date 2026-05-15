@@ -8,6 +8,7 @@ import cors from 'cors';
 import { SipManager } from './sip/SipManager.js';
 import { AiPipeline } from './ai/Pipeline.js';
 import { FishAudioClient } from './ai/FishAudioClient.js';
+import { TicketGenerator } from './ai/TicketGenerator.js';
 
 const app = express();
 app.use(cors());
@@ -35,12 +36,30 @@ app.get('/api/calls', async (req, res) => {
   }
 });
 
+app.get('/api/stats', async (req, res) => {
+  try {
+    const stats = await sip.getDb().getStats();
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({ error: 'Error al obtener estadísticas' });
+  }
+});
+
 app.get('/api/calls/:id/transcripts', async (req, res) => {
   try {
     const transcripts = await sip.getDb().getTranscripts(req.params.id);
     res.json(transcripts);
   } catch (error) {
     res.status(500).json({ error: 'Error al obtener transcripciones' });
+  }
+});
+
+app.get('/api/tickets', async (req, res) => {
+  try {
+    const tickets = await sip.getDb().getTickets();
+    res.json(tickets);
+  } catch (error) {
+    res.status(500).json({ error: 'Error al obtener tickets' });
   }
 });
 

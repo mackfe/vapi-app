@@ -6,6 +6,7 @@ import { RtpManager } from './RtpManager.js';
 import { getLocalIp } from '../utils/network.js';
 import { AiPipeline } from '../ai/Pipeline.js';
 import { FishAudioClient } from '../ai/FishAudioClient.js';
+import { TicketGenerator } from '../ai/TicketGenerator.js';
 import { DbManager } from '../database/DbManager.js';
 
 dotenv.config();
@@ -23,6 +24,7 @@ export class SipManager {
   private rtp: RtpManager | null = null;
   private ai: AiPipeline;
   private tts: FishAudioClient;
+  private ticketGen: TicketGenerator;
   private db: DbManager;
   private io: any;
 
@@ -30,6 +32,7 @@ export class SipManager {
     this.sipStack = sip;
     this.ai = new AiPipeline();
     this.tts = new FishAudioClient();
+    this.ticketGen = new TicketGenerator();
     this.db = new DbManager();
     this.db.init();
     this.io = io;
@@ -182,10 +185,20 @@ export class SipManager {
     this.sipStack.send(response);
     
     // Extraer Caller ID del encabezado From
-    this.callId = uuidv4();
     const callerUri = request.headers.from.uri;
     const callerId = callerUri.split(':')[1]?.split('@')[0] || 'Desconocido';
+
+    // FILTRO DE SEGURIDAD: Ignorar números de prueba, escaneos o bots
+    const isSuspicious = callerId.length < 7 || /^(.)\1+$/.test(callerId) || callerId === 'admin' || callerId === 'asterisk';
     
+    if (isSuspicious) {
+      console.log(`[SIP] ⚠️ Llamada filtrada (Prueba/Bot): ${callerId}. No se registrará.`);
+      this.sipStack.send(this.sipStack.makeResponse(request, 480, 'Temporarily Unavailable'));
+      if (this.rtp) this.rtp.stop();
+      return;
+    }
+    
+    this.callId = uuidv4();
     console.log(`[SIP] Llamada aceptada de: ${callerId}. Intentando registrar en DB... (ID: ${this.callId})`);
     if (this.io) this.io.emit('call-started', { callerId });
     
@@ -308,10 +321,36 @@ export class SipManager {
     // Registrar fin de llamada con costo
     await this.db.endCall(this.callId, finalCost);
     
+    // [NUEVO] Generar Ticket AI Automáticamente
+    this.generateCallTicket(this.callId).catch(err => console.error('[Ticket] Fail:', err));
+
     // Limpiar estado
     this.rtpServer?.close();
     if (this.rtp) this.rtp.stop();
     if (this.io) this.io.emit('call-ended');
+  }
+
+  private async generateCallTicket(callId: string) {
+    try {
+      const transcripts = await this.db.getTranscripts(callId);
+      if (transcripts.length === 0) return;
+
+      const conversation = transcripts
+        .map((t: any) => `${t.role === 'user' ? 'Vecino' : 'IA'}: ${t.content}`)
+        .join('\n');
+
+      const ticketData = await this.ticketGen.generateFromTranscript(conversation);
+      if (ticketData) {
+        await this.db.createTicket(
+          callId, 
+          ticketData.subject, 
+          ticketData.summary, 
+          ticketData.priority
+        );
+      }
+    } catch (error) {
+      console.error('[SIP] Error al generar ticket automático:', error);
+    }
   }
 
   private getLocalIp() {
