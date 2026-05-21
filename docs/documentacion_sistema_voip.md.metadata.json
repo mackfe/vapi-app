@@ -1,0 +1,5 @@
+{
+  "artifactType":  "ARTIFACT_TYPE_WALKTHROUGH",
+  "summary":  "Technical documentation of the VoIP AI agent project, explaining system architecture, key modules (Dashboard, Calls/Finance, Tickets CRM, SIP Engine), database schema, and complete AI pipeline, with screenshots.",
+  "updatedAt":  "2026-05-18T11:48:59.612469277Z"
+}

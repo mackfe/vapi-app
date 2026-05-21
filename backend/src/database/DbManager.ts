@@ -260,7 +260,7 @@ export class DbManager {
   public async createTicket(callId: string, subject: string, summary: string, priority: string) {
     try {
       await this.pool.query(
-        'INSERT INTO tickets (call_id, subject, summary, priority) VALUES ($1, $2, $3, $4)',
+        "INSERT INTO tickets (call_id, subject, summary, priority, status) VALUES ($1, $2, $3, $4, 'pending')",
         [callId, subject, summary, priority]
       );
       console.log(`[DB] ✅ Ticket creado para la llamada: ${callId}`);

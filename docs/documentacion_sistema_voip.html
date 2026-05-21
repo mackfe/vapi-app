@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dossier Técnico y Manual de Operación - JOBAAJ Call Center AI</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800;900&family=Playfair+Display:ital,wght@0,700;1,400&display=swap');
+        
+        body {
+            font-family: 'Outfit', 'Inter', -apple-system, sans-serif;
+            color: #2d2d2d;
+            line-height: 1.8;
+            margin: 0;
+            padding: 0;
+            background-color: #fcfcfc;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 60px;
+            background-color: #ffffff;
+            border-radius: 40px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.05);
+            border: 1px solid #f0f0f0;
+        }
+
+        .cover-page {
+            text-align: center;
+            padding: 100px 0 60px 0;
+            border-bottom: 2px solid #f5f5f5;
+            margin-bottom: 60px;
+        }
+
+        .logo {
+            font-size: 32px;
+            font-weight: 900;
+            color: #e04f39;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 20px;
+        }
+
+        .cover-title {
+            font-family: 'Playfair Display', serif;
+            font-size: 42px;
+            font-weight: 900;
+            color: #1a1a1a;
+            line-height: 1.2;
+            margin: 20px 0;
+        }
+
+        .cover-subtitle {
+            font-size: 18px;
+            font-weight: 600;
+            color: #666666;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            margin-bottom: 40px;
+        }
+
+        .meta-info {
+            font-size: 14px;
+            color: #999999;
+            margin-top: 100px;
+            font-weight: 600;
+        }
+
+        h2 {
+            font-size: 26px;
+            font-weight: 800;
+            color: #1a1a1a;
+            border-left: 5px solid #e04f39;
+            padding-left: 15px;
+            margin-top: 50px;
+            margin-bottom: 25px;
+        }
+
+        h3 {
+            font-size: 20px;
+            font-weight: 800;
+            color: #2d2d2d;
+            margin-top: 35px;
+            margin-bottom: 15px;
+        }
+
+        p {
+            font-size: 16px;
+            color: #4a4a4a;
+            margin-bottom: 20px;
+            text-align: justify;
+        }
+
+        ul {
+            padding-left: 20px;
+            margin-bottom: 25px;
+        }
+
+        li {
+            font-size: 15px;
+            color: #4a4a4a;
+            margin-bottom: 10px;
+        }
+
+        strong {
+            color: #1a1a1a;
+        }
+
+        .badge-list {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 30px;
+        }
+
+        .badge {
+            background-color: #f7f7f7;
+            border: 1px solid #e8e8e8;
+            padding: 8px 16px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #4a4a4a;
+        }
+
+        .highlight-box {
+            background: linear-gradient(135deg, #fdf8f7 0%, #fcf3f1 100%);
+            border-left: 4px solid #e04f39;
+            padding: 30px;
+            border-radius: 24px;
+            margin: 35px 0;
+        }
+
+        .highlight-box p {
+            margin: 0;
+            font-style: italic;
+            color: #5a5a5a;
+        }
+
+        .screenshot-container {
+            margin: 45px 0;
+            text-align: center;
+            background-color: #fafafa;
+            padding: 20px;
+            border-radius: 32px;
+            border: 1px solid #eaeaea;
+        }
+
+        .screenshot {
+            max-width: 100%;
+            height: auto;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+        }
+
+        .caption {
+            font-size: 13px;
+            color: #888888;
+            margin-top: 15px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 35px 0;
+            background-color: #ffffff;
+            border-radius: 20px;
+            overflow: hidden;
+            border: 1px solid #eee;
+        }
+
+        th {
+            background-color: #fdf8f7;
+            color: #e04f39;
+            font-weight: 800;
+            text-align: left;
+            padding: 18px;
+            font-size: 14px;
+            border-bottom: 2px solid #f5e6e3;
+        }
+
+        td {
+            padding: 18px;
+            font-size: 14px;
+            color: #4a4a4a;
+            border-bottom: 1px solid #eee;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .tech-flow {
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            padding: 30px;
+            border-radius: 24px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            margin: 35px 0;
+            overflow-x: auto;
+        }
+
+        .tech-flow span {
+            color: #9cdcfe;
+        }
+
+        .tech-flow .keyword {
+            color: #569cd6;
+        }
+
+        .tech-flow .comment {
+            color: #6a9955;
+        }
+
+        .divider {
+            height: 1px;
+            background-color: #eee;
+            margin: 50px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        
+        <!-- COVER PAGE -->
+        <div class="cover-page">
+            <div class="logo">JOBAAJ</div>
+            <h1 class="cover-title">Dossier Técnico y Manual de Operación</h1>
+            <div class="cover-subtitle">Sistema VoIP de Atención Municipal con Inteligencia Artificial</div>
+            <div class="meta-info">
+                Preparado para: Administración Municipal y Equipo Directivo<br>
+                Fecha de Emisión: Mayo 2026<br>
+                Tecnología: AI Voice Agent CRM & Analytics Platform
+            </div>
+        </div>
+
+        <!-- INTRODUCCIÓN -->
+        <h2>1. Introducción y Propósito del Sistema</h2>
+        <p>
+            El <strong>JOBAAJ Call Center AI</strong> es una plataforma de software de nivel empresarial diseñada para automatizar y optimizar la atención telefónica al ciudadano en entornos municipales. Utilizando tecnologías avanzadas de telecomunicaciones (SIP/RTP) e Inteligencia Artificial de última generación (LLMs, STT y TTS de ultra-baja latencia), el sistema actúa como un agente de voz inteligente que atiende de forma autónoma las consultas de los vecinos.
+        </p>
+        <p>
+            Esta plataforma reduce la saturación de los canales de atención tradicionales, centraliza el control de los reportes en un CRM simplificado con priorización inteligente y ofrece auditorías de costos de procesamiento en tiempo real.
+        </p>
+
+        <div class="highlight-box">
+            <p>
+                "La plataforma automatiza la recepción de quejas y solicitudes urbanas, generando de manera autónoma un resumen analítico, el asunto formal de gestión y el nivel de prioridad para su despacho inmediato a las áreas operativas del municipio."
+            </p>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- ARQUITECTURA -->
+        <h2>2. Arquitectura Tecnológica y Stack de Desarrollo</h2>
+        <p>
+            El sistema está construido siguiendo los estándares de diseño modernos de alta concurrencia, dividiendo la carga de trabajo de forma eficiente entre frontend, backend y los motores de IA en la nube:
+        </p>
+        
+        <ul>
+            <li><strong>Core Backend:</strong> Node.js con TypeScript, utilizando Express para APIs de control, PostgreSQL como motor relacional, y WebSockets (Socket.io) para comunicación bidireccional en tiempo real con el panel de administración.</li>
+            <li><strong>Frontend Administrativo:</strong> React + Vite, estructurado bajo un diseño premium de alta fidelidad estética (Estilo PwC). Incluye Framer Motion para transiciones suaves y Recharts para modelado analítico responsivo.</li>
+            <li><strong>Procesamiento de Voz y LLM:</strong> STT fluido por <strong>Deepgram</strong>, procesamiento de lenguaje natural y generación de reportes por <strong>Llama-3.3-70b (vía Groq)</strong>, y síntesis de voz (TTS) humanizada provista por <strong>FishAudio</strong>.</li>
+        </ul>
+
+        <div class="divider"></div>
+
+        <!-- MÓDULO 1 -->
+        <h2>3. Módulos de la Plataforma</h2>
+        
+        <h3>Módulo A: Centro de Control (Dashboard Principal)</h3>
+        <p>
+            Enfocado exclusivamente en la <strong>operación y rendimiento técnico</strong> del call center municipal en tiempo real. Permite evaluar de manera visual la cantidad de llamadas procesadas, efectividad de respuesta del bot, tiempos medios de conversación y el número acumulado de tickets pendientes por atender.
+        </p>
+
+        <div class="screenshot-container">
+            <img class="screenshot" src="file:///home/glasius/.gemini/antigravity/brain/114e840b-1d51-4d76-8606-c8f56a244d40/dashboard_verification_1778862765082.png" alt="Dashboard Principal">
+            <div class="caption">Figura 1: Panel Operativo en Tiempo Real (JOBAAJ Call Center AI)</div>
+        </div>
+
+        <p>
+            El gráfico de barras inferior muestra el <strong>Volumen Semanal</strong> de tráfico en rojo corporativo para detectar picos estacionales de demanda, mientras que el gráfico de dona a la izquierda mapea de forma clara la tasa de llamadas contestadas frente a intentos fallidos.
+        </p>
+
+        <div class="divider"></div>
+
+        <!-- MÓDULO 2 -->
+        <h3>Módulo B: Control y Reportes Financieros (Llamadas)</h3>
+        <p>
+            Este panel centraliza el **monitoreo presupuestario**. Cada interacción con la Inteligencia Artificial consume recursos de red y procesamiento. El sistema calcula en milisegundos el costo exacto del servicio por llamada (TTS + STT + procesamiento por tokens de IA) permitiendo un control exacto de la inversión municipal.
+        </p>
+
+        <div class="screenshot-container">
+            <img class="screenshot" src="file:///home/glasius/.gemini/antigravity/brain/114e840b-1d51-4d76-8606-c8f56a244d40/llamadas_tab_verification_1778862798589.png" alt="Módulo Financiero">
+            <div class="caption">Figura 2: Panel de Análisis Financiero y Evolución de Gastos Diarios</div>
+        </div>
+
+        <p>
+            Incluye un <strong>AreaChart de Recharts</strong> que modela los gastos diarios de la plataforma. En la parte inferior, el administrador dispone de un listado interactivo con el desglose exacto de cada llamada (número de teléfono, fecha, duración y costo con cuatro decimales de precisión).
+        </p>
+
+        <div class="divider"></div>
+
+        <!-- MÓDULO 3 -->
+        <h3>Módulo C: CRM Automatizado de Reportes (Tickets AI)</h3>
+        <p>
+            El corazón de la gestión ciudadana. Elimina el trabajo manual de transcripción y tipificación de reclamos. La IA analiza la llamada, genera el ticket en tiempo real y lo cataloga de forma estructurada según criticidad.
+        </p>
+
+        <div class="screenshot-container">
+            <img class="screenshot" src="file:///home/glasius/.gemini/antigravity/brain/114e840b-1d51-4d76-8606-c8f56a244d40/.system_generated/click_feedback/click_feedback_1778873257630.png" alt="CRM de Tickets AI">
+            <div class="caption">Figura 3: Interfaz de Gestión (CRM) de Tickets Generados con Modal de Detalle e Interacción de Estados</div>
+        </div>
+
+        <p>
+            Este módulo cuenta con:
+        </p>
+        <ul>
+            <li><strong>KPIs de Tickets:</strong> Monitoreo de Tickets Totales, Sin Atender, En Proceso y Culminados.</li>
+            <li><strong>Pestañas de Flujo de Trabajo:</strong> Tabs dinámicos para clasificar tickets por su estado interno y poder gestionarlos.</li>
+            <li><strong>Selector de Prioridad:</strong> Filtros dinámicos basados en la criticidad calculada de forma autónoma por el LLM (Urgente, Alta, Media, Baja).</li>
+            <li><strong>Modal de Gestión Directo:</strong> Permite leer el resumen detallado y presionar un solo botón (ej: "Marcar Culminado") para actualizar la base de datos en tiempo real.</li>
+        </ul>
+
+        <div class="divider"></div>
+
+        <!-- PIPELINE -->
+        <h2>4. El Pipeline de Procesamiento de IA (Paso a Paso)</h2>
+        <p>
+            El procesamiento de los datos sigue un flujo secuencial estricto desde la conexión de la llamada hasta la visualización en la pantalla del administrador:
+        </p>
+
+        <div class="tech-flow">
+            <span class="comment">// Flujo Secuencial Post-Llamada</span><br>
+            1. Vecino establece conexión con el servidor SIP (Llamada Entrante)<br>
+            2. Audio RTP se canaliza bidireccionalmente a <span class="keyword">Deepgram STT</span> y <span class="keyword">FishAudio TTS</span> en tiempo real.<br>
+            3. Al finalizar la llamada (BYE), <span class="keyword">SipManager</span> detiene la grabación e inserta los datos de duración y coste.<br>
+            4. Se dispara <span class="keyword">TicketGenerator.ts</span> enviando la transcripción completa a <span class="keyword">Llama-3.3-70b (Groq)</span>.<br>
+            5. La IA procesa y genera un JSON con el Asunto, Resumen y Prioridad.<br>
+            6. Se inserta en la tabla <span class="keyword">tickets</span> con estado "pending" y se notifica mediante WebSockets al Frontend.<br>
+            7. El panel se actualiza en tiempo real en la pantalla del administrador municipal.
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- ESQUEMA DB -->
+        <h2>5. Estructura de la Base de Datos (PostgreSQL)</h2>
+        <p>
+            La base de datos relacional está optimizada para guardar la trazabilidad y consistencia del sistema:
+        </p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Tabla</th>
+                    <th>Campos Clave</th>
+                    <th>Propósito y Relación</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>calls</strong></td>
+                    <td>id (UUID), caller_id, started_at, ended_at, cost, status</td>
+                    <td>Registro principal de cada interacción telefónica y su costo asociado.</td>
+                </tr>
+                <tr>
+                    <td><strong>transcripts</strong></td>
+                    <td>id (Serial), call_id (FK -> calls.id), role, content, created_at</td>
+                    <td>Auditoría completa de la conversación frase por frase (Vecino vs IA).</td>
+                </tr>
+                <tr>
+                    <td><strong>tickets</strong></td>
+                    <td>id (Serial), call_id (FK -> calls.id), subject, summary, priority, status, created_at</td>
+                    <td>Estructuración y estado del ticket en el CRM (pending, in_progress, completed).</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="divider"></div>
+
+        <!-- CONCLUSIÓN -->
+        <h2>6. Conclusión y Valor Estratégico</h2>
+        <p>
+            El <strong>JOBAAJ Call Center AI</strong> representa la vanguardia tecnológica en gestión pública municipal. Al automatizar la primera línea de atención de manera fluida y generar reportes analíticos de manera inmediata, el municipio logra una reducción de costos masiva y aumenta dramáticamente la velocidad de resolución de incidencias, impactando directamente en la calidad de vida de los vecinos de forma transparente e inteligente.
+        </p>
+
+        <div class="meta-info" style="text-align: center; margin-top: 50px;">
+            Fin del Documento Técnico Operativo<br>
+            © JOBAAJ Call Center AI 2026. Todos los derechos reservados.
+        </div>
+
+    </div>
+
+</body>
+</html>

@@ -189,10 +189,12 @@ export class SipManager {
     const callerId = callerUri.split(':')[1]?.split('@')[0] || 'Desconocido';
 
     // FILTRO DE SEGURIDAD: Ignorar números de prueba, escaneos o bots
-    const isSuspicious = callerId.length < 7 || /^(.)\1+$/.test(callerId) || callerId === 'admin' || callerId === 'asterisk';
+    const toUri = request.headers.to.uri || '';
+    const isIntendedForUs = toUri.includes(config.user!) || (process.env.SIP_NUMBER && toUri.includes(process.env.SIP_NUMBER));
+    const isSuspicious = callerId.length < 7 || /^(.)\1+$/.test(callerId) || callerId === 'admin' || callerId === 'asterisk' || !isIntendedForUs;
     
     if (isSuspicious) {
-      console.log(`[SIP] ⚠️ Llamada filtrada (Prueba/Bot): ${callerId}. No se registrará.`);
+      console.log(`[SIP] ⚠️ Llamada filtrada (Scanner/Bot): De ${callerId} hacia ${toUri}. No se registrará.`);
       this.sipStack.send(this.sipStack.makeResponse(request, 480, 'Temporarily Unavailable'));
       if (this.rtp) this.rtp.stop();
       return;
