@@ -14,27 +14,43 @@ import {
   TrendingUp,
   Download,
   Activity,
-  Menu
+  Menu,
+  Mail,
+  Lock,
+  AlertTriangle,
+  Play
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  PieChart, 
-  Pie, 
-  Cell, 
-  BarChart, 
-  Bar, 
+import {
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
   AreaChart,
   Area,
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
   ResponsiveContainer,
   Legend
 } from 'recharts';
+import { apiFetch, API_URL } from './utils/api';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const FISH_VOICES = [
+  { label: 'Messi (Español)', id: 'cbc49fd65ff347ccb70f3426cc768a81', gender: 'M' },
+  { label: 'Valentino (Español)', id: '8d2c17a9b26d4d83888ea67a1ee565b2', gender: 'M' },
+  { label: 'Hugo (Español)', id: 'be47ebe7ff874b799e44865381985978', gender: 'M' },
+  { label: 'Matías (Español)', id: '81a7b94456444511a1fd69edc2b6110d', gender: 'M' },
+  { label: 'Cristian (Español)', id: '1342b3dbc7e54c5b91cddfc5f98fca74', gender: 'M' },
+  { label: 'Carina (Español)', id: '312af98d8ba44e7eaeac90696a93ac40', gender: 'F' },
+  { label: 'Carmen (Español)', id: '4322ba92ac0746ca9e24e09158e5c337', gender: 'F' },
+  { label: 'Daniela (Español)', id: '55589185654d4d5abc1035280611fb65', gender: 'F' },
+  { label: 'Clara (Español)', id: '259103f055f24a1598478cd0966befe4', gender: 'F' },
+  { label: 'Voz Personalizada...', id: 'custom', gender: 'all' }
+];
 
 const socket = io(API_URL, {
   transports: ['websocket', 'polling'],
@@ -53,12 +69,39 @@ const COLORS = {
 };
 
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('vox_ia_token'));
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+
   const [activeTab, setActiveTab] = useState('dashboard');
   const [ticketStatusTab, setTicketStatusTab] = useState('pending');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [selectedTicket, setSelectedTicket] = useState<any>(null);
   const [calls, setCalls] = useState<any[]>([]);
   const [tickets, setTickets] = useState<any[]>([]);
+  const [blacklist, setBlacklist] = useState<any[]>([]);
+  const [securityMode, setSecurityMode] = useState<'blacklist' | 'whitelist'>('blacklist');
+  const [settingsTab, setSettingsTab] = useState('general');
+  const [agents, setAgents] = useState<any[]>([]);
+  const [showAgentModal, setShowAgentModal] = useState(false);
+  const [showVoiceModal, setShowVoiceModal] = useState(false);
+  const [editingAgent, setEditingAgent] = useState<any>(null);
+  const [editingFullAgentId, setEditingFullAgentId] = useState<number | null>(null);
+  const [voiceGenderFilter, setVoiceGenderFilter] = useState<'all' | 'M' | 'F'>('all');
+  const [newAgent, setNewAgent] = useState({
+    name: '',
+    phone_number: '',
+    ai_model: 'llama-3.3-70b-versatile',
+    groq_api_key: '',
+    fishaudio_api_key: '',
+    voice_reference_id: FISH_VOICES[0].id,
+    sip_domain: '',
+    sip_user: '',
+    sip_password: ''
+  });
+  const [newBlacklistPhone, setNewBlacklistPhone] = useState('');
+  const [newBlacklistDesc, setNewBlacklistDesc] = useState('');
   const [stats, setStats] = useState<any>({ 
     total: 0, 
     answered: 0, 
@@ -80,9 +123,18 @@ function App() {
   const [callerId, setCallerId] = useState('');
 
   useEffect(() => {
+    if (!isAuthenticated) return;
+
     fetchCalls();
     fetchStats();
     fetchTickets();
+    if (activeTab === 'settings' && settingsTab === 'security') {
+      fetchBlacklist();
+      fetchSecurityMode();
+    }
+    if (activeTab === 'settings' && settingsTab === 'lines') {
+      fetchAgents();
+    }
 
     socket.on('connect', () => {
       setSipStatus('registered');
@@ -111,11 +163,153 @@ function App() {
       socket.off('call-started');
       socket.off('call-ended');
     };
-  }, []);
+  }, [isAuthenticated, activeTab, settingsTab]);
+
+  const fetchSecurityMode = async () => {
+    try {
+      const res = await apiFetch('/api/settings/security_mode');
+      const data = await res.json();
+      setSecurityMode(data.mode);
+    } catch (e) {
+      console.error('Error fetching security mode');
+    }
+  };
+
+  const fetchAgents = async () => {
+    try {
+      const res = await apiFetch('/api/agents');
+      const data = await res.json();
+      setAgents(data);
+    } catch (e) {
+      console.error('Error fetching agents');
+    }
+  };
+
+  const handleSaveAgent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAgent.name || !newAgent.phone_number || !newAgent.groq_api_key || !newAgent.fishaudio_api_key || !newAgent.sip_domain || !newAgent.sip_user || !newAgent.sip_password) return;
+    try {
+      if (editingFullAgentId) {
+        await apiFetch(`/api/agents/${editingFullAgentId}`, {
+          method: 'PUT',
+          body: JSON.stringify(newAgent)
+        });
+      } else {
+        await apiFetch('/api/agents', {
+          method: 'POST',
+          body: JSON.stringify(newAgent)
+        });
+      }
+      setShowAgentModal(false);
+      setEditingFullAgentId(null);
+      setNewAgent({ name: '', phone_number: '', ai_model: 'llama-3.3-70b-versatile', groq_api_key: '', fishaudio_api_key: '', voice_reference_id: FISH_VOICES[0].id, sip_domain: '', sip_user: '', sip_password: '' });
+      fetchAgents();
+    } catch (e) {
+      console.error('Error saving agent');
+    }
+  };
+
+  const handleUpdateVoice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAgent) return;
+    try {
+      await apiFetch(`/api/agents/${editingAgent.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(editingAgent)
+      });
+      setShowVoiceModal(false);
+      setEditingAgent(null);
+      fetchAgents();
+    } catch (e) {
+      console.error('Error updating voice');
+    }
+  };
+
+  const playDemo = async (referenceId: string, apiKey: string) => {
+    if (!apiKey) return;
+    try {
+      const res = await apiFetch('/api/demo/fishaudio', {
+        method: 'POST',
+        body: JSON.stringify({
+          apiKey,
+          referenceId,
+          text: "Hola, soy el asistente de inteligencia artificial. Esta es una prueba de la voz seleccionada."
+        })
+      });
+      if (!res.ok) throw new Error("Error fetching demo");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.play().catch(e => {
+        alert("Audio de demostración no disponible");
+        console.error("Error playing audio:", e);
+      });
+    } catch (e) {
+      alert("Error contactando con la API de FishAudio. Revisa tu API Key.");
+    }
+  };
+
+  const handleDeleteAgent = async (id: number) => {
+    if (!window.confirm('¿Seguro que deseas eliminar este agente?')) return;
+    try {
+      await apiFetch(`/api/agents/${id}`, { method: 'DELETE' });
+      fetchAgents();
+    } catch (e) {
+      console.error('Error deleting agent');
+    }
+  };
+
+  const handleToggleSecurityMode = async () => {
+    const newMode = securityMode === 'blacklist' ? 'whitelist' : 'blacklist';
+    try {
+      await apiFetch('/api/settings/security_mode', {
+        method: 'POST',
+        body: JSON.stringify({ mode: newMode })
+      });
+      setSecurityMode(newMode);
+    } catch (e) {
+      console.error('Error updating security mode');
+    }
+  };
+
+  const fetchBlacklist = async () => {
+    try {
+      const res = await apiFetch('/api/blacklist');
+      const data = await res.json();
+      setBlacklist(data);
+    } catch (e) {
+      console.error('Error fetching blacklist');
+    }
+  };
+
+  const handleAddBlacklist = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBlacklistPhone) return;
+    try {
+      await apiFetch('/api/blacklist', {
+        method: 'POST',
+        body: JSON.stringify({ phone_number: newBlacklistPhone, description: newBlacklistDesc })
+      });
+      setNewBlacklistPhone('');
+      setNewBlacklistDesc('');
+      fetchBlacklist();
+    } catch (e) {
+      console.error('Error adding to blacklist');
+    }
+  };
+
+  const handleRemoveBlacklist = async (id: number) => {
+    try {
+      await apiFetch(`/api/blacklist/${id}`, { method: 'DELETE' });
+      fetchBlacklist();
+    } catch (e) {
+      console.error('Error removing from blacklist');
+    }
+  };
 
   const fetchCalls = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/calls`);
+      const res = await apiFetch('/api/calls');
       const data = await res.json();
       setCalls(data);
     } catch (e) {
@@ -125,7 +319,7 @@ function App() {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/stats`);
+      const res = await apiFetch('/api/stats');
       const data = await res.json();
       setStats(data);
     } catch (e) {
@@ -135,7 +329,7 @@ function App() {
 
   const fetchTickets = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/tickets`);
+      const res = await apiFetch('/api/tickets');
       const data = await res.json();
       setTickets(data);
     } catch (e) {
@@ -145,9 +339,8 @@ function App() {
 
   const updateTicketStatus = async (id: number, status: string) => {
     try {
-      await fetch(`${API_URL}/api/tickets/${id}/status`, {
+      await apiFetch(`/api/tickets/${id}/status`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status })
       });
       fetchTickets();
@@ -162,7 +355,7 @@ function App() {
     setSelectedCall(call);
     setIsLoadingTranscripts(true);
     try {
-      const res = await fetch(`${API_URL}/api/calls/${call.id}/transcripts`);
+      const res = await apiFetch(`/api/calls/${call.id}/transcripts`);
       const data = await res.json();
       setSelectedTranscripts(data);
     } catch (e) {
@@ -171,6 +364,111 @@ function App() {
       setIsLoadingTranscripts(false);
     }
   };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(`${API_URL}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: loginEmail, password: loginPassword })
+      });
+      const data = await res.json();
+      if (data.success && data.token) {
+        localStorage.setItem('vox_ia_token', data.token);
+        setIsAuthenticated(true);
+        setLoginError('');
+      } else {
+        setLoginError('Credenciales inválidas');
+      }
+    } catch (error) {
+      setLoginError('Error de conexión con el servidor');
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('vox_ia_token');
+    setIsAuthenticated(false);
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4 font-sans">
+        <div className="w-full max-w-4xl bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col md:flex-row min-h-[500px]">
+          
+          {/* Left Panel - Login Form */}
+          <div className="flex-1 p-10 md:p-12 relative flex flex-col justify-center">
+            
+            {/* Logo */}
+            <div className="absolute top-8 left-8 flex items-center gap-2">
+              <div className="w-8 h-8 bg-[#e04f39] text-white rounded-lg flex items-center justify-center">
+                <Phone className="w-4 h-4" />
+              </div>
+              <span className="font-black text-xl tracking-tighter text-[#2d2d2d]">Vox.IA</span>
+            </div>
+
+            <div className="max-w-xs mx-auto w-full text-center mt-12 md:mt-0">
+              <h1 className="text-3xl font-black text-[#e04f39] mb-6">Iniciar sesión</h1>
+              
+              <p className="text-xs text-gray-400 mb-6 font-medium">Usa tus credenciales de administrador</p>
+
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <Mail className="w-5 h-5 text-gray-400" />
+                  </div>
+                  <input 
+                    type="email" 
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    className="w-full pl-11 pr-4 py-3 bg-gray-50 rounded-xl border-none focus:outline-none focus:ring-2 focus:ring-[#e04f39]/20 transition-all font-medium text-gray-700"
+                    placeholder="Correo electrónico"
+                  />
+                </div>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                    <Lock className="w-5 h-5 text-gray-400" />
+                  </div>
+                  <input 
+                    type="password" 
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    className="w-full pl-11 pr-4 py-3 bg-gray-50 rounded-xl border-none focus:outline-none focus:ring-2 focus:ring-[#e04f39]/20 transition-all font-medium text-gray-700"
+                    placeholder="Contraseña"
+                  />
+                </div>
+                
+                <div className="text-center pt-2">
+                  <a href="#" className="text-sm font-semibold text-gray-500 hover:text-[#e04f39] transition-colors">¿Olvidaste tu contraseña?</a>
+                </div>
+
+                {loginError && <p className="text-red-500 text-xs font-bold text-center mt-2">{loginError}</p>}
+
+                <div className="pt-4">
+                  <button type="submit" className="px-12 py-3 bg-[#e04f39] hover:bg-[#d0432f] text-white rounded-full font-bold uppercase tracking-wider text-sm transition-colors shadow-lg shadow-[#e04f39]/30">
+                    INGRESAR
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          {/* Right Panel - Welcome Message */}
+          <div className="hidden md:flex flex-col justify-center items-center w-[40%] bg-gradient-to-br from-[#e04f39] to-[#ffb600] text-white p-12 text-center relative overflow-hidden">
+            {/* Decorative elements */}
+            <div className="absolute -top-12 -right-12 w-40 h-40 bg-white/10 rounded-full blur-2xl"></div>
+            <div className="absolute -bottom-12 -left-12 w-40 h-40 bg-black/10 rounded-full blur-2xl"></div>
+            
+            <h2 className="text-4xl font-black mb-4 z-10">Hola de nuevo</h2>
+            <p className="font-medium text-white/90 mb-8 z-10 leading-relaxed">
+              Ingresa tus credenciales para acceder al panel de control y gestionar la seguridad de Vox.IA.
+            </p>
+          </div>
+
+        </div>
+      </div>
+    );
+  }
 
   const filteredCalls = calls.filter(c => 
     c.caller_id.includes(searchTerm) || c.id.includes(searchTerm)
@@ -200,40 +498,36 @@ function App() {
 
   return (
     <div className="min-h-screen bg-[#f3f4f6] text-[#2d2d2d] font-sans flex">
-      {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-gray-200 flex flex-col shadow-sm fixed h-full z-20">
-        <div className="p-8">
-          <div className="flex items-center gap-3 mb-10">
-            <div className="w-10 h-10 bg-[#e04f39] rounded-lg flex items-center justify-center text-white shadow-lg shadow-orange-100">
-              <Phone size={20} strokeWidth={3} />
+      <aside className="w-64 bg-white border-r border-gray-100 flex flex-col shadow-sm z-10 relative">
+        <div className="h-24 flex items-center px-8 border-b border-gray-50/50 bg-white sticky top-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-[#e04f39] text-white rounded-xl flex items-center justify-center shadow-lg shadow-[#e04f39]/20">
+              <Phone className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-xl font-black tracking-tighter leading-none">JOBAAJ</h1>
-              <p className="text-[10px] font-bold text-[#e04f39] uppercase tracking-widest mt-1">Call Center AI</p>
+              <h1 className="text-xl font-black tracking-tighter leading-none">Vox.IA</h1>
+              <p className="text-[9px] uppercase font-bold tracking-[0.2em] text-[#e04f39]">CALL CENTER AI</p>
             </div>
           </div>
-
-          <nav className="space-y-2">
-            <NavItem icon={<BarChart3 size={20} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-            <NavItem icon={<History size={20} />} label="Llamadas" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
-            <NavItem icon={<CheckCircle2 size={20} />} label="Tickets AI" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
-            <NavItem icon={<Settings size={20} />} label="Configuración" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
-          </nav>
         </div>
+        <nav className="p-8 space-y-2 flex-1">
+          <NavItem icon={<BarChart3 size={20} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+          <NavItem icon={<History size={20} />} label="Llamadas" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
+          <NavItem icon={<CheckCircle2 size={20} />} label="Tickets AI" active={activeTab === 'tickets'} onClick={() => setActiveTab('tickets')} />
+          <NavItem icon={<Settings size={20} />} label="Configuración" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
+        </nav>
 
-        <div className="mt-auto p-6 border-t border-gray-50">
-          <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-2xl">
-            <div className={`w-2.5 h-2.5 rounded-full ${sipStatus === 'registered' ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-            <div>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Estado SIP</p>
-              <p className="text-xs font-black uppercase">{sipStatus === 'registered' ? 'Activo' : 'Error'}</p>
-            </div>
-          </div>
+        <div className="p-6">
+          <button 
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-4 py-3 text-red-500 hover:bg-red-50 rounded-2xl transition-all font-semibold text-sm"
+          >
+            Logout
+          </button>
         </div>
       </aside>
 
-      {/* Content */}
-      <main className="flex-1 ml-64 p-10 overflow-y-auto">
+      <main className="flex-1 p-10 overflow-y-auto">
         <header className="flex justify-between items-center mb-10">
           <div>
             <h2 className="text-3xl font-black tracking-tight">
@@ -243,21 +537,11 @@ function App() {
             </h2>
             <p className="text-gray-500 font-medium">Gestionando inteligencia operativa en tiempo real.</p>
           </div>
-          <div className="flex gap-4">
-            <button className="bg-white px-6 py-3 rounded-xl border border-gray-200 text-sm font-bold shadow-sm hover:bg-gray-50 flex items-center gap-2">
-              <Download size={18} /> Exportar
-            </button>
-            <div className="bg-[#e04f39] text-white px-6 py-3 rounded-xl shadow-lg shadow-orange-100 flex items-center gap-3">
-              <User size={18} />
-              <span className="font-bold text-sm tracking-tight">Administrador</span>
-            </div>
-          </div>
         </header>
 
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' ? (
             <motion.div key="dash" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="space-y-8">
-              {/* Stats Grid */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <StatCard label="Total Llamadas" value={stats.total} icon={<Phone size={24} className="text-[#e04f39]" />} trend="+12%" />
                 <StatCard 
@@ -271,7 +555,6 @@ function App() {
                 <StatCard label="Tickets Activos" value={tickets.length} icon={<History size={24} className="text-[#e04f39]" />} trend="Auto" />
               </div>
 
-              {/* Charts Row */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-1 bg-white p-8 rounded-[32px] shadow-sm border border-gray-100 min-h-[400px] flex flex-col">
                   <h3 className="font-black text-lg mb-6 text-[#2d2d2d]">Estado de Respuesta</h3>
@@ -304,7 +587,6 @@ function App() {
                 </div>
               </div>
 
-              {/* Recent Activity Table */}
               <div className="bg-white rounded-[32px] shadow-sm border border-gray-100 overflow-hidden">
                 <div className="p-8 border-b border-gray-50 flex justify-between items-center">
                   <h3 className="font-black text-lg">Actividad Reciente</h3>
@@ -338,7 +620,6 @@ function App() {
             </motion.div>
           ) : activeTab === 'tickets' ? (
             <motion.div key="tickets" initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="space-y-8">
-              {/* Ticket Stats */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <StatCard label="Total Tickets" value={stats.ticketStats?.total || 0} icon={<Activity size={24} className="text-blue-500" />} trend="IA" />
                 <StatCard label="Sin Atender" value={stats.ticketStats?.pending || 0} icon={<Clock size={24} className="text-red-500" />} trend="New" />
@@ -346,7 +627,6 @@ function App() {
                 <StatCard label="Culminados" value={stats.ticketStats?.completed || 0} icon={<CheckCircle2 size={24} className="text-green-500" />} trend="Done" />
               </div>
 
-              {/* Ticket Activity Chart */}
               <div className="bg-white p-8 rounded-[32px] shadow-sm border border-gray-100 flex flex-col">
                 <h3 className="font-black text-lg mb-6 text-[#2d2d2d]">Generación de Tickets por Día</h3>
                 <div className="h-[250px] w-full">
@@ -368,7 +648,6 @@ function App() {
                 </div>
               </div>
 
-              {/* Tabs and Filters */}
               <div className="flex flex-col md:flex-row justify-between items-center gap-6">
                 <div className="flex bg-gray-50 p-1.5 rounded-2xl border border-gray-100">
                   <button 
@@ -407,7 +686,6 @@ function App() {
                 </div>
               </div>
 
-              {/* Tickets Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                 {filteredTickets.map(ticket => (
                   <div key={ticket.id} onClick={() => setSelectedTicket(ticket)} className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all flex flex-col group cursor-pointer">
@@ -445,14 +723,12 @@ function App() {
             </motion.div>
           ) : activeTab === 'history' ? (
             <motion.div key="history" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-8">
-              {/* Financial Stats in History Tab */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <StatCard label="Total Minutos" value={stats.totalMins} icon={<Clock size={24} className="text-blue-500" />} trend="Mins" />
                 <StatCard label="Gasto Total" value={`$${stats.totalCost}`} icon={<TrendingUp size={24} className="text-green-500" />} trend="USD" />
                 <StatCard label="Costo/Min" value={`$${stats.avgCostMin}`} icon={<BarChart3 size={24} className="text-purple-500" />} trend="Avg" />
               </div>
 
-              {/* Spending Chart in History Tab */}
               <div className="bg-white p-8 rounded-[32px] shadow-sm border border-gray-100 flex flex-col">
                 <h3 className="font-black text-lg mb-6 text-[#2d2d2d]">Análisis de Gastos Diarios</h3>
                 <div className="h-[300px] w-full">
@@ -520,26 +796,410 @@ function App() {
               </div>
             </motion.div>
           ) : (
-            <motion.div key="settings" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white p-16 rounded-[40px] text-center border border-gray-100">
-              <Settings size={80} className="mx-auto text-gray-100 mb-8" />
-              <h3 className="text-3xl font-black mb-4">Configuración</h3>
-              <p className="text-gray-400 max-w-sm mx-auto mb-10">Ajustes globales del sistema de telefonía e inteligencia artificial.</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl mx-auto text-left">
-                <div className="p-8 bg-gray-50 rounded-[32px] border border-gray-100">
-                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-4">Infraestructura</p>
-                   <div className="flex justify-between items-center">
-                     <span className="font-bold text-sm">SIP Server</span>
-                     <span className="text-green-500 font-black text-xs">CONECTADO</span>
-                   </div>
-                </div>
-                <div className="p-8 bg-gray-50 rounded-[32px] border border-gray-100">
-                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-4">Motor AI</p>
-                   <div className="flex justify-between items-center">
-                     <span className="font-bold text-sm">GPT-4 / Groq</span>
-                     <span className="text-green-500 font-black text-xs">ONLINE</span>
-                   </div>
+            <motion.div key="settings" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white p-16 rounded-[40px] text-center border border-gray-100 min-h-[60vh] flex flex-col">
+              <div className="flex items-center gap-6 mb-12 border-b border-gray-100 pb-8 overflow-x-auto">
+                <Settings size={40} className="text-gray-200" />
+                <h3 className="text-3xl font-black">Configuración</h3>
+                <div className="ml-auto flex gap-2">
+                  <button onClick={() => setSettingsTab('general')} className={`px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all ${settingsTab === 'general' ? 'bg-[#e04f39] text-white shadow-lg shadow-orange-100' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'}`}>General</button>
+                  <button onClick={() => setSettingsTab('lines')} className={`px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all ${settingsTab === 'lines' ? 'bg-[#e04f39] text-white shadow-lg shadow-orange-100' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'}`}>Líneas / Agentes</button>
+                  <button onClick={() => setSettingsTab('security')} className={`px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all ${settingsTab === 'security' ? 'bg-[#e04f39] text-white shadow-lg shadow-orange-100' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'}`}>Seguridad</button>
+                  <button onClick={() => setSettingsTab('kb')} className={`px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all ${settingsTab === 'kb' ? 'bg-[#e04f39] text-white shadow-lg shadow-orange-100' : 'bg-gray-50 text-gray-400 hover:bg-gray-100'}`}>Base de Conocimiento</button>
                 </div>
               </div>
+
+              {settingsTab === 'general' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl mx-auto text-left w-full">
+                  <div className="p-8 bg-gray-50 rounded-[32px] border border-gray-100">
+                     <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-4">Infraestructura</p>
+                     <div className="flex justify-between items-center">
+                       <span className="font-bold text-sm">SIP Server</span>
+                       <span className="text-green-500 font-black text-xs">CONECTADO</span>
+                     </div>
+                  </div>
+                  <div className="p-8 bg-gray-50 rounded-[32px] border border-gray-100">
+                     <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-4">Motor AI</p>
+                     <div className="flex justify-between items-center">
+                       <span className="font-bold text-sm">GPT-4 / Groq</span>
+                       <span className="text-green-500 font-black text-xs">ONLINE</span>
+                     </div>
+                  </div>
+                </div>
+              )}
+
+              {settingsTab === 'lines' && (
+                <div className="text-left w-full max-w-6xl mx-auto flex flex-col gap-8">
+                  <div className="flex justify-between items-center bg-gray-50 p-8 rounded-[32px] border border-gray-100">
+                    <div>
+                      <h4 className="font-black text-xl text-[#2d2d2d] mb-1">Agentes y Líneas SIP</h4>
+                      <p className="text-sm font-medium text-gray-500">Administra los números y la IA asignada a cada uno.</p>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        setEditingFullAgentId(null);
+                        setNewAgent({ name: '', phone_number: '', ai_model: 'llama-3.3-70b-versatile', groq_api_key: '', fishaudio_api_key: '', voice_reference_id: FISH_VOICES[0].id, sip_domain: '', sip_user: '', sip_password: '' });
+                        setShowAgentModal(true);
+                      }} 
+                      className="bg-[#e04f39] text-white px-8 py-4 rounded-2xl font-black text-sm shadow-lg shadow-orange-100 hover:scale-105 transition-all"
+                    >
+                      + AÑADIR AGENTE
+                    </button>
+                  </div>
+
+                  <div className="bg-white border border-gray-100 rounded-[32px] overflow-hidden shadow-sm">
+                    <table className="w-full text-left">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Agente</th>
+                          <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Línea SIP</th>
+                          <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Modelo AI</th>
+                          <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">API Keys</th>
+                          <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {agents.map(agent => (
+                          <tr key={agent.id} className="hover:bg-gray-50/50 transition-all">
+                            <td className="px-8 py-6 font-bold text-[#2d2d2d]">{agent.name}</td>
+                            <td className="px-8 py-6 font-black text-[#e04f39] bg-orange-50/50 rounded-lg inline-block my-4 mx-8">{agent.phone_number}</td>
+                            <td className="px-8 py-6 text-xs font-bold text-gray-500 bg-gray-50 rounded-lg inline-block my-4 mx-8 uppercase tracking-wider">{agent.ai_model}</td>
+                            <td className="px-8 py-6 text-xs font-medium text-gray-400">
+                              Groq: {agent.groq_api_key ? '✅' : '❌'} <br/>
+                              FishAudio: {agent.fishaudio_api_key ? '✅' : '❌'}
+                            </td>
+                            <td className="px-8 py-6 text-right space-x-2">
+                              <button onClick={() => { setEditingAgent(agent); setShowVoiceModal(true); }} className="text-[#e04f39] hover:bg-orange-50 px-4 py-2 rounded-xl transition-all font-black text-[10px] uppercase tracking-widest border border-transparent hover:border-orange-200">
+                                CONFIGURAR VOZ
+                              </button>
+                              <button onClick={() => { 
+                                setEditingFullAgentId(agent.id); 
+                                setNewAgent(agent); 
+                                setShowAgentModal(true); 
+                              }} className="text-blue-500 hover:bg-blue-50 px-4 py-2 rounded-xl transition-all font-black text-[10px] uppercase tracking-widest border border-transparent hover:border-blue-200">
+                                EDITAR
+                              </button>
+                              <button onClick={() => handleDeleteAgent(agent.id)} className="text-red-500 hover:bg-red-50 px-4 py-2 rounded-xl transition-all font-black text-[10px] uppercase tracking-widest border border-transparent hover:border-red-200">
+                                ELIMINAR
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        {agents.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="px-8 py-12 text-center font-bold text-gray-400">
+                              No hay agentes configurados. El sistema rechazará todas las llamadas.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <AnimatePresence>
+                    {showAgentModal && (
+                      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                        <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-white rounded-[40px] p-10 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl">
+                          <div className="flex justify-between items-center mb-8">
+                            <h3 className="text-2xl font-black">{editingFullAgentId ? 'Editar Agente' : 'Nuevo Agente'}</h3>
+                            <button onClick={() => setShowAgentModal(false)} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors">
+                              <X size={20} />
+                            </button>
+                          </div>
+                          
+                          <form onSubmit={handleSaveAgent} className="flex flex-col gap-6">
+                            <div className="grid grid-cols-2 gap-6">
+                              <div>
+                                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 px-2">Nombre del Agente *</label>
+                                <input 
+                                  type="text" 
+                                  required
+                                  placeholder="Ej: Atención de Reclamos"
+                                  className="w-full px-6 py-4 bg-gray-50 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#e04f39] outline-none font-medium text-sm transition-all"
+                                  value={newAgent.name}
+                                  onChange={(e) => setNewAgent({...newAgent, name: e.target.value})}
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 px-2">Número SIP (Extensión) *</label>
+                                <input 
+                                  type="text" 
+                                  required
+                                  placeholder="Ej: 974386"
+                                  className="w-full px-6 py-4 bg-gray-50 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#e04f39] outline-none font-medium text-sm transition-all"
+                                  value={newAgent.phone_number}
+                                  onChange={(e) => setNewAgent({...newAgent, phone_number: e.target.value})}
+                                />
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 px-2">Modelo AI</label>
+                              <select 
+                                className="w-full px-6 py-4 bg-gray-50 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#e04f39] outline-none font-medium text-sm transition-all cursor-pointer"
+                                value={newAgent.ai_model}
+                                onChange={(e) => setNewAgent({...newAgent, ai_model: e.target.value})}
+                              >
+                                <option value="llama-3.3-70b-versatile">Llama 3.3 70B Versatile (Recomendado)</option>
+                                <option value="llama3-8b-8192">Llama 3 8B (Rápido)</option>
+                                <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
+                              </select>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-6 p-6 bg-gray-50 border border-gray-200 rounded-[24px]">
+                                <h4 className="font-black text-sm text-gray-400 uppercase tracking-widest mb-2">Credenciales (API Keys)</h4>
+                                <div>
+                                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 px-2">Groq API Key *</label>
+                                  <input 
+                                    type="password" 
+                                    required
+                                    placeholder="gsk_..."
+                                    className="w-full px-6 py-4 bg-white rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#e04f39] outline-none font-medium text-sm transition-all"
+                                    value={newAgent.groq_api_key}
+                                    onChange={(e) => setNewAgent({...newAgent, groq_api_key: e.target.value})}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 px-2">FishAudio API Key *</label>
+                                  <input 
+                                    type="password" 
+                                    required
+                                    placeholder="sk-..."
+                                    className="w-full px-6 py-4 bg-white rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#e04f39] outline-none font-medium text-sm transition-all"
+                                    value={newAgent.fishaudio_api_key}
+                                    onChange={(e) => setNewAgent({...newAgent, fishaudio_api_key: e.target.value})}
+                                  />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-6 p-6 bg-orange-50 border border-orange-100 rounded-[24px]">
+                                <h4 className="font-black text-sm text-[#e04f39] uppercase tracking-widest mb-2">Conexión Telefónica (SIP Trunk)</h4>
+                                <div>
+                                  <label className="block text-[10px] font-black text-[#e04f39]/70 uppercase tracking-widest mb-2 px-2">Dominio SIP *</label>
+                                  <input 
+                                    type="text" 
+                                    required
+                                    placeholder="Ej: sip.serverdainus.net"
+                                    className="w-full px-6 py-4 bg-white rounded-2xl border border-orange-200 focus:ring-2 focus:ring-[#e04f39] outline-none font-medium text-sm transition-all"
+                                    value={newAgent.sip_domain}
+                                    onChange={(e) => setNewAgent({...newAgent, sip_domain: e.target.value})}
+                                  />
+                                </div>
+                                <div className="grid grid-cols-2 gap-6">
+                                  <div>
+                                    <label className="block text-[10px] font-black text-[#e04f39]/70 uppercase tracking-widest mb-2 px-2">Usuario SIP *</label>
+                                    <input 
+                                      type="text" 
+                                      required
+                                      placeholder="Ej: 974386"
+                                      className="w-full px-6 py-4 bg-white rounded-2xl border border-orange-200 focus:ring-2 focus:ring-[#e04f39] outline-none font-medium text-sm transition-all"
+                                      value={newAgent.sip_user}
+                                      onChange={(e) => setNewAgent({...newAgent, sip_user: e.target.value})}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[10px] font-black text-[#e04f39]/70 uppercase tracking-widest mb-2 px-2">Contraseña SIP *</label>
+                                    <input 
+                                      type="password" 
+                                      required
+                                      placeholder="••••••••"
+                                      className="w-full px-6 py-4 bg-white rounded-2xl border border-orange-200 focus:ring-2 focus:ring-[#e04f39] outline-none font-medium text-sm transition-all"
+                                      value={newAgent.sip_password}
+                                      onChange={(e) => setNewAgent({...newAgent, sip_password: e.target.value})}
+                                    />
+                                  </div>
+                                </div>
+                            </div>
+
+                            <button 
+                              type="submit" 
+                              disabled={!newAgent.name || !newAgent.phone_number || !newAgent.groq_api_key || !newAgent.fishaudio_api_key}
+                              className="mt-4 w-full py-5 bg-[#e04f39] text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-lg shadow-orange-100 hover:scale-[1.02] transition-all disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed"
+                            >
+                              Guardar Agente
+                            </button>
+                          </form>
+                        </motion.div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <AnimatePresence>
+                    {showVoiceModal && editingAgent && (
+                      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                        <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} className="bg-white rounded-[40px] p-10 w-full max-w-lg shadow-2xl">
+                          <div className="flex justify-between items-center mb-8">
+                            <div>
+                              <h3 className="text-2xl font-black">Catálogo de Voces</h3>
+                              <p className="text-xs font-bold text-gray-400 uppercase mt-1">Agente: {editingAgent.name}</p>
+                            </div>
+                            <button onClick={() => { setShowVoiceModal(false); setEditingAgent(null); }} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors">
+                              <X size={20} />
+                            </button>
+                          </div>
+                          
+                          <form onSubmit={handleUpdateVoice} className="flex flex-col gap-6">
+                            <div>
+                              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 px-2">Catálogo de Plantillas</label>
+                              <div className="flex flex-col gap-4">
+                                <div className="flex gap-2 px-2">
+                                  <button type="button" onClick={() => setVoiceGenderFilter('all')} className={`flex-1 py-2 rounded-xl text-[10px] font-black tracking-widest transition-all ${voiceGenderFilter === 'all' ? 'bg-gray-800 text-white shadow-md' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>TODAS</button>
+                                  <button type="button" onClick={() => setVoiceGenderFilter('M')} className={`flex-1 py-2 rounded-xl text-[10px] font-black tracking-widest transition-all ${voiceGenderFilter === 'M' ? 'bg-blue-500 text-white shadow-md shadow-blue-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>HOMBRES</button>
+                                  <button type="button" onClick={() => setVoiceGenderFilter('F')} className={`flex-1 py-2 rounded-xl text-[10px] font-black tracking-widest transition-all ${voiceGenderFilter === 'F' ? 'bg-pink-500 text-white shadow-md shadow-pink-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>MUJERES</button>
+                                </div>
+                                <select 
+                                  className="w-full px-6 py-4 bg-gray-50 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#e04f39] outline-none font-medium text-sm transition-all cursor-pointer"
+                                  value={FISH_VOICES.some(v => v.id === editingAgent.voice_reference_id) ? editingAgent.voice_reference_id : 'custom'}
+                                  onChange={(e) => {
+                                    if (e.target.value !== 'custom') {
+                                      setEditingAgent({...editingAgent, voice_reference_id: e.target.value});
+                                    }
+                                  }}
+                                >
+                                  <option value="custom" disabled>Selecciona una plantilla (opcional)...</option>
+                                  {FISH_VOICES.filter(v => v.id !== 'custom' && (voiceGenderFilter === 'all' || v.gender === voiceGenderFilter)).map(voice => (
+                                    <option key={voice.id} value={voice.id}>{voice.label}</option>
+                                  ))}
+                                </select>
+                                
+                                <div className="flex gap-4">
+                                  <input 
+                                    type="text" 
+                                    placeholder="Pega aquí tu Reference ID de FishAudio"
+                                    className="flex-1 px-6 py-4 bg-white rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#e04f39] outline-none font-medium text-sm transition-all"
+                                    value={editingAgent.voice_reference_id}
+                                    onChange={(e) => setEditingAgent({...editingAgent, voice_reference_id: e.target.value})}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => playDemo(editingAgent.voice_reference_id, editingAgent.fishaudio_api_key)}
+                                    className="bg-[#e04f39]/10 hover:bg-[#e04f39]/20 text-[#e04f39] px-6 py-4 rounded-2xl font-bold text-sm transition-all flex items-center gap-2"
+                                  >
+                                    <Play size={16} /> Probar
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+
+                            <button 
+                              type="submit" 
+                              className="mt-4 w-full py-5 bg-[#e04f39] text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-lg shadow-orange-100 hover:scale-[1.02] transition-all"
+                            >
+                              Guardar Voz
+                            </button>
+                          </form>
+                        </motion.div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+
+              {settingsTab === 'kb' && (
+                <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
+                  <p className="font-bold">Base de Conocimiento - Próximamente (Fase 3)</p>
+                </div>
+              )}
+
+              {settingsTab === 'security' && (
+                <div className="text-left w-full max-w-4xl mx-auto flex flex-col gap-8">
+                  {/* Switch de Seguridad */}
+                  <div className="bg-gray-50 p-8 rounded-[32px] border border-gray-100 flex items-center justify-between">
+                    <div>
+                      <h4 className="font-black text-lg text-[#2d2d2d] mb-1">Modo de Seguridad</h4>
+                      <p className="text-sm font-medium text-gray-500">
+                        {securityMode === 'blacklist' 
+                          ? 'Lista Negra: Se permiten todas las llamadas excepto las listadas abajo.' 
+                          : 'Lista Blanca: SE BLOQUEAN todas las llamadas excepto las listadas abajo.'}
+                      </p>
+                    </div>
+                    <button 
+                      onClick={handleToggleSecurityMode}
+                      className={`relative w-20 h-10 rounded-full transition-colors duration-300 ${securityMode === 'whitelist' ? 'bg-[#e04f39]' : 'bg-gray-300'}`}
+                    >
+                      <span 
+                        className={`absolute top-1 left-1 bg-white w-8 h-8 rounded-full transition-transform duration-300 shadow-md ${securityMode === 'whitelist' ? 'transform translate-x-10' : ''}`}
+                      />
+                    </button>
+                  </div>
+
+                  {securityMode === 'whitelist' && (
+                    <div className="bg-orange-50 border border-orange-200 text-[#e04f39] p-6 rounded-2xl flex items-center gap-4">
+                      <AlertTriangle size={24} />
+                      <div>
+                        <h5 className="font-bold">Atención: Modo Lista Blanca estricto activado</h5>
+                        <p className="text-sm">El sistema rechazará automáticamente cualquier llamada que no coincida con los números o patrones de la lista.</p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="bg-gray-50 p-8 rounded-[32px] border border-gray-100">
+                    <h4 className="font-black text-lg mb-6 text-[#2d2d2d]">
+                      {securityMode === 'blacklist' ? 'Agregar a Lista Negra' : 'Agregar a Lista Blanca'}
+                    </h4>
+                    <form onSubmit={handleAddBlacklist} className="flex flex-col gap-4">
+                      <div className="flex gap-4">
+                        <div className="flex-1 relative">
+                          <input 
+                            type="text" 
+                            placeholder="Número o Patrón..." 
+                            className="w-full px-6 py-4 bg-white rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#e04f39] outline-none font-medium text-sm transition-all"
+                            value={newBlacklistPhone}
+                            onChange={(e) => setNewBlacklistPhone(e.target.value)}
+                            required
+                          />
+                          <p className="text-xs text-gray-400 mt-2 font-medium px-2">Tip: Puedes usar '%' al final para códigos de país o prefijos completos (Ej. +7% o 00%).</p>
+                        </div>
+                        <input 
+                          type="text" 
+                          placeholder="Descripción (opcional)" 
+                          className="flex-1 h-14 px-6 py-4 bg-white rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#e04f39] outline-none font-medium text-sm transition-all"
+                          value={newBlacklistDesc}
+                          onChange={(e) => setNewBlacklistDesc(e.target.value)}
+                        />
+                        <button type="submit" className="h-14 bg-[#e04f39] text-white px-8 rounded-2xl font-black text-sm shadow-lg shadow-orange-100 hover:scale-105 transition-all">
+                          {securityMode === 'blacklist' ? 'BLOQUEAR' : 'PERMITIR'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+
+                  <div className="bg-white border border-gray-100 rounded-[32px] overflow-hidden shadow-sm">
+                    <table className="w-full text-left">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Número / Patrón</th>
+                          <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Descripción</th>
+                          <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Fecha</th>
+                          <th className="px-8 py-5 text-right text-[10px] font-black text-gray-400 uppercase tracking-widest">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {blacklist.map(item => (
+                          <tr key={item.id} className="hover:bg-gray-50/50 transition-all">
+                            <td className="px-8 py-5 font-bold text-[#2d2d2d]">{item.phone_number}</td>
+                            <td className="px-8 py-5 font-medium text-gray-500">{item.description || '-'}</td>
+                            <td className="px-8 py-5 font-bold text-xs text-gray-400">{new Date(item.created_at).toLocaleDateString()}</td>
+                            <td className="px-8 py-5 text-right">
+                              <button onClick={() => handleRemoveBlacklist(item.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-xl transition-all font-black text-[10px] uppercase tracking-widest">
+                                ELIMINAR
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        {blacklist.length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="px-8 py-10 text-center font-bold text-gray-400">
+                              {securityMode === 'blacklist' 
+                                ? 'No hay números en la lista negra.' 
+                                : 'No hay números permitidos. Se bloquearán todas las llamadas.'}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

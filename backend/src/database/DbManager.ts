@@ -72,6 +72,54 @@ export class DbManager {
         );
       `);
 
+      // [NUEVO] Tabla de Blacklist
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS blacklist (
+          id SERIAL PRIMARY KEY,
+          phone_number VARCHAR(50) UNIQUE NOT NULL,
+          description TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+
+      // [NUEVO] Tabla de Configuración Global
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS system_settings (
+            key VARCHAR(50) PRIMARY KEY,
+            value TEXT
+        );
+      `);
+      await this.pool.query(`
+        INSERT INTO system_settings (key, value) VALUES ('security_mode', 'blacklist') ON CONFLICT DO NOTHING;
+      `);
+
+      // [NUEVO] Tabla de Agentes (Líneas SIP)
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS agents (
+            id SERIAL PRIMARY KEY,
+            phone_number VARCHAR(50) UNIQUE NOT NULL,
+            name VARCHAR(100) NOT NULL,
+            ai_model VARCHAR(50) DEFAULT 'llama-3.3-70b-versatile',
+            groq_api_key VARCHAR(255),
+            fishaudio_api_key VARCHAR(255),
+            voice_reference_id VARCHAR(255),
+            sip_domain VARCHAR(100),
+            sip_user VARCHAR(50),
+            sip_password VARCHAR(100),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+
+      // Migraciones de esquema
+      try {
+        await this.pool.query('ALTER TABLE agents ADD COLUMN IF NOT EXISTS sip_domain VARCHAR(100);');
+        await this.pool.query('ALTER TABLE agents ADD COLUMN IF NOT EXISTS sip_user VARCHAR(50);');
+        await this.pool.query('ALTER TABLE agents ADD COLUMN IF NOT EXISTS sip_password VARCHAR(100);');
+      } catch (e) {
+        console.log('[DB] Migraciones omitidas (posiblemente ya existen).');
+      }
+
+
       console.log('[DB] Tablas verificadas/creadas correctamente.');
     } catch (error) {
       console.error('[DB] Error al inicializar tablas:', error);
@@ -289,6 +337,175 @@ export class DbManager {
       await this.pool.query('UPDATE tickets SET status = $1 WHERE id = $2', [status, id]);
     } catch (error) {
       console.error('[DB] Error al actualizar ticket:', error);
+    }
+  }
+
+  public async isBlacklisted(callerId: string): Promise<boolean> {
+    try {
+      const result = await this.pool.query(
+        "SELECT * FROM blacklist WHERE $1 LIKE phone_number || '%'",
+        [callerId]
+      );
+      return result.rows.length > 0;
+    } catch (error) {
+      console.error('[DB] Error verificando blacklist:', error);
+      return false;
+    }
+  }
+
+  public async getBlacklist(): Promise<any[]> {
+    try {
+      const result = await this.pool.query('SELECT * FROM blacklist ORDER BY created_at DESC');
+      return result.rows;
+    } catch (error) {
+      console.error('[DB] Error obteniendo blacklist:', error);
+      return [];
+    }
+  }
+
+  public async addBlacklist(phoneNumber: string, description: string): Promise<void> {
+    try {
+      await this.pool.query(
+        'INSERT INTO blacklist (phone_number, description) VALUES ($1, $2) ON CONFLICT (phone_number) DO UPDATE SET description = $2',
+        [phoneNumber, description]
+      );
+      console.log(`[DB] ✅ Número agregado al blacklist: ${phoneNumber}`);
+    } catch (error) {
+      console.error('[DB] Error agregando al blacklist:', error);
+      throw error;
+    }
+  }
+
+  public async removeBlacklist(id: number): Promise<void> {
+    try {
+      await this.pool.query('DELETE FROM blacklist WHERE id = $1', [id]);
+      console.log(`[DB] ✅ Número eliminado del blacklist (ID: ${id})`);
+    } catch (error) {
+      console.error('[DB] Error eliminando del blacklist:', error);
+      throw error;
+    }
+  }
+
+  // [NUEVO] Métodos para Modo de Seguridad
+  public async getSecurityMode(): Promise<string> {
+    try {
+      const result = await this.pool.query("SELECT value FROM system_settings WHERE key = 'security_mode'");
+      return result.rows.length > 0 ? result.rows[0].value : 'blacklist';
+    } catch (error) {
+      console.error('[DB] Error obteniendo security_mode:', error);
+      return 'blacklist';
+    }
+  }
+
+  public async setSecurityMode(mode: 'blacklist' | 'whitelist'): Promise<void> {
+    try {
+      await this.pool.query(
+        "INSERT INTO system_settings (key, value) VALUES ('security_mode', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
+        [mode]
+      );
+      console.log(`[DB] ✅ Modo de seguridad cambiado a: ${mode}`);
+    } catch (error) {
+      console.error('[DB] Error cambiando security_mode:', error);
+      throw error;
+    }
+  }
+
+  public async isAllowedInWhitelist(callerId: string): Promise<boolean> {
+    try {
+      // Si la lista está vacía, no bloqueamos todo por defecto para evitar aislar el sistema.
+      // Opcionalmente, la regla estricta sería bloquear. Vamos a verificar si la lista está vacía primero.
+      const listCount = await this.pool.query('SELECT COUNT(*) FROM blacklist');
+      if (parseInt(listCount.rows[0].count) === 0) {
+        return true; // Si la whitelist está vacía, permitimos (o podríamos retornar false para bloqueo total)
+      }
+
+      const result = await this.pool.query(
+        "SELECT * FROM blacklist WHERE $1 LIKE phone_number || '%'",
+        [callerId]
+      );
+      return result.rows.length > 0;
+    } catch (error) {
+      console.error('[DB] Error verificando whitelist:', error);
+      return false; // Ante la duda en modo estricto, bloquear (o permitir según política)
+    }
+  }
+
+  // --- MÉTODOS CRUD DE AGENTES ---
+  
+  public async getAgents(): Promise<any[]> {
+    try {
+      const result = await this.pool.query('SELECT * FROM agents ORDER BY id ASC');
+      return result.rows;
+    } catch (error) {
+      console.error('[DB] Error obteniendo agentes:', error);
+      return [];
+    }
+  }
+
+  public async getAgentByPhone(phoneNumber: string): Promise<any | null> {
+    try {
+      const result = await this.pool.query('SELECT * FROM agents WHERE phone_number = $1', [phoneNumber]);
+      return result.rows.length > 0 ? result.rows[0] : null;
+    } catch (error) {
+      console.error(`[DB] Error obteniendo agente por número ${phoneNumber}:`, error);
+      return null;
+    }
+  }
+
+  public async addAgent(agent: any): Promise<void> {
+    try {
+      await this.pool.query(
+        `INSERT INTO agents (phone_number, name, ai_model, groq_api_key, fishaudio_api_key, voice_reference_id, sip_domain, sip_user, sip_password)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          agent.phone_number,
+          agent.name,
+          agent.ai_model || 'llama-3.3-70b-versatile',
+          agent.groq_api_key,
+          agent.fishaudio_api_key,
+          agent.voice_reference_id,
+          agent.sip_domain,
+          agent.sip_user,
+          agent.sip_password
+        ]
+      );
+    } catch (error) {
+      console.error('[DB] Error añadiendo agente:', error);
+      throw error;
+    }
+  }
+
+  public async updateAgent(id: number, agent: any): Promise<void> {
+    try {
+      await this.pool.query(
+        `UPDATE agents 
+         SET phone_number = $1, name = $2, ai_model = $3, groq_api_key = $4, fishaudio_api_key = $5, voice_reference_id = $6, sip_domain = $7, sip_user = $8, sip_password = $9
+         WHERE id = $10`,
+        [
+          agent.phone_number,
+          agent.name,
+          agent.ai_model,
+          agent.groq_api_key,
+          agent.fishaudio_api_key,
+          agent.voice_reference_id,
+          agent.sip_domain,
+          agent.sip_user,
+          agent.sip_password,
+          id
+        ]
+      );
+    } catch (error) {
+      console.error(`[DB] Error actualizando agente ${id}:`, error);
+      throw error;
+    }
+  }
+
+  public async deleteAgent(id: number): Promise<void> {
+    try {
+      await this.pool.query('DELETE FROM agents WHERE id = $1', [id]);
+    } catch (error) {
+      console.error(`[DB] Error eliminando agente ${id}:`, error);
+      throw error;
     }
   }
 }

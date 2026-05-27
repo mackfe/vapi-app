@@ -22,16 +22,12 @@ export class SipManager {
   private callId: string = uuidv4();
   private isRegistered: boolean = false;
   private rtp: RtpManager | null = null;
-  private ai: AiPipeline;
-  private tts: FishAudioClient;
   private ticketGen: TicketGenerator;
   private db: DbManager;
   private io: any;
 
   constructor(io?: any) {
     this.sipStack = sip;
-    this.ai = new AiPipeline();
-    this.tts = new FishAudioClient();
     this.ticketGen = new TicketGenerator();
     this.db = new DbManager();
     this.db.init();
@@ -43,7 +39,7 @@ export class SipManager {
   }
 
   public async start() {
-    console.log(`[SIP] Iniciando registro para ${config.user}@${config.domain}...`);
+    console.log(`[SIP] Iniciando stack SIP...`);
     
     const options = {
       port: 5060,
@@ -57,21 +53,30 @@ export class SipManager {
       });
 
       console.log('[SIP] Servidor en modo ESCUCHA (Esperando INVITE directo)...');
+      
+      // Realizar registro de todos los agentes que tengan credenciales
+      const publicIp = process.env.PUBLIC_IP || '200.8.121.19';
+      const agents = await this.db.getAgents();
+      for (const agent of agents) {
+        if (agent.sip_domain && agent.sip_user && agent.sip_password) {
+          console.log(`[SIP] Registrando Agente: ${agent.name} en ${agent.sip_domain}`);
+          this.register(agent.sip_domain, agent.sip_user, agent.sip_password, publicIp);
+        }
+      }
     } catch (error) {
       console.error('[SIP] Error al iniciar stack:', error);
     }
   }
 
-  private register() {
-    const publicIp = process.env.PUBLIC_IP || '200.8.121.19';
-    const contact = { uri: `sip:${config.user}@${publicIp}:5060` };
+  private register(domain: string, user: string, pass: string, publicIp: string) {
+    const contact = { uri: `sip:${user}@${publicIp}:5060` };
     
     const request = {
       method: 'REGISTER',
-      uri: `sip:${config.domain}`,
+      uri: `sip:${domain}`,
       headers: {
-        to: { uri: `sip:${config.user}@${config.domain}` },
-        from: { uri: `sip:${config.user}@${config.domain}`, params: { tag: uuidv4() } },
+        to: { uri: `sip:${user}@${domain}` },
+        from: { uri: `sip:${user}@${domain}`, params: { tag: uuidv4() } },
         'call-id': this.callId,
         cseq: { method: 'REGISTER', seq: Math.floor(Math.random() * 1000) },
         contact: [contact],
@@ -89,7 +94,7 @@ export class SipManager {
       } else if (response.status === 401 || response.status === 407) {
         const authHeaderStr = response.headers['www-authenticate'] || response.headers['proxy-authenticate'];
         if (authHeaderStr) {
-          const authHeader = createAuthHeader('REGISTER', request.uri, authHeaderStr, config.user!, config.password!);
+          const authHeader = createAuthHeader('REGISTER', request.uri, authHeaderStr, user, pass);
           const authenticatedRequest = {
             ...request,
             headers: {
@@ -188,21 +193,49 @@ export class SipManager {
     const callerUri = request.headers.from.uri;
     const callerId = callerUri.split(':')[1]?.split('@')[0] || 'Desconocido';
 
+    // [NUEVO] Escudo de Seguridad
+    const securityMode = await this.db.getSecurityMode();
+    let isBlocked = false;
+
+    if (securityMode === 'whitelist') {
+      const isAllowed = await this.db.isAllowedInWhitelist(callerId);
+      if (!isAllowed) {
+        console.log(`[SIP] 🛡️ Llamada BLOQUEADA por Whitelist (Modo Estricto): ${callerId}`);
+        isBlocked = true;
+      }
+    } else {
+      isBlocked = await this.db.isBlacklisted(callerId);
+      if (isBlocked) {
+        console.log(`[SIP] 🛡️ Llamada BLOQUEADA por Blacklist: ${callerId}`);
+      }
+    }
+
+    if (isBlocked) {
+      this.sipStack.send(this.sipStack.makeResponse(request, 403, 'Forbidden'));
+      if (this.rtp) this.rtp.stop();
+      return; // Cortar la ejecución aquí, no gasta tokens ni DB
+    }
+
     // FILTRO DE SEGURIDAD: Ignorar números de prueba, escaneos o bots
     const toUri = request.headers.to.uri || '';
-    const isIntendedForUs = toUri.includes(config.user!) || (process.env.SIP_NUMBER && toUri.includes(process.env.SIP_NUMBER));
-    const isSuspicious = callerId.length < 7 || /^(.)\1+$/.test(callerId) || callerId === 'admin' || callerId === 'asterisk' || !isIntendedForUs;
-    
-    if (isSuspicious) {
-      console.log(`[SIP] ⚠️ Llamada filtrada (Scanner/Bot): De ${callerId} hacia ${toUri}. No se registrará.`);
-      this.sipStack.send(this.sipStack.makeResponse(request, 480, 'Temporarily Unavailable'));
+    const destinationNumber = toUri.split(':')[1]?.split('@')[0];
+
+    // [NUEVO] Búsqueda Dinámica de Agente
+    const agent = await this.db.getAgentByPhone(destinationNumber);
+    if (!agent) {
+      console.log(`[SIP] ⚠️ Llamada a extensión no configurada (${destinationNumber}). Rechazada.`);
+      this.sipStack.send(this.sipStack.makeResponse(request, 404, 'Not Found'));
       if (this.rtp) this.rtp.stop();
       return;
     }
-    
+
+    // [NUEVO] Instanciación Aislada de IA
+    const callAi = new AiPipeline(agent.groq_api_key, agent.ai_model);
+    const callTts = new FishAudioClient(agent.fishaudio_api_key, agent.voice_reference_id);
+
     this.callId = uuidv4();
-    console.log(`[SIP] Llamada aceptada de: ${callerId}. Intentando registrar en DB... (ID: ${this.callId})`);
-    if (this.io) this.io.emit('call-started', { callerId });
+    console.log(`[SIP] Llamada aceptada de: ${callerId} hacia el Agente: ${agent.name} (${destinationNumber}). (ID: ${this.callId})`);
+    if (this.io) this.io.emit('call-started', { callerId, agentName: agent.name });
     
     // Registrar llamada en DB
     await this.db.createCall(this.callId, callerId);
@@ -249,12 +282,12 @@ export class SipManager {
             const costStt = (durationSec / 60) * PRICES.STT_PER_MIN;
             totalCallCost += costStt;
 
-            const text = await this.ai.getTranscription(currentBuffer);
+            const text = await callAi.getTranscription(currentBuffer);
             if (text && text.trim().length > 1) {
               isAiSpeaking = true;
               if (this.io) this.io.emit('transcription', `Vecino: ${text}`);
               
-              const response = await this.ai.getAiResponse(text);
+              const response = await callAi.getAiResponse(text);
               
               // 2. Costo LLM (Groq) - Estimación tokens: palabras * 1.3
               const tokens = response.split(' ').length * 1.3;
@@ -270,7 +303,7 @@ export class SipManager {
               const costTts = (response.length / 1000000) * PRICES.TTS_PER_1M_CHARS;
               totalCallCost += costTts;
 
-              const audioResponse = await this.tts.textToSpeech(response);
+              const audioResponse = await callTts.textToSpeech(response);
               if (this.io) this.io.emit('audio-chunk', audioResponse);
               
               if (this.rtp && audioResponse.length > 0) {

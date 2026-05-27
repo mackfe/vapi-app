@@ -9,23 +9,27 @@ export class FishAudioClient {
   private apiKey: string;
   private referenceId: string;
 
-  constructor() {
-    this.apiKey = process.env.FISHAUDIO_API_KEY!;
-    this.referenceId = process.env.FISHAUDIO_REFERENCE_ID!;
+  constructor(apiKey?: string, referenceId?: string) {
+    this.apiKey = apiKey !== undefined ? apiKey : process.env.FISHAUDIO_API_KEY!;
+    this.referenceId = referenceId !== undefined ? referenceId : process.env.FISHAUDIO_REFERENCE_ID!;
   }
 
   public async textToSpeech(text: string): Promise<Buffer> {
     console.log(`[FishAudio] Sintetizando voz para: "${text.substring(0, 30)}..."`);
     
     try {
+      const payload: any = {
+        text,
+        format: 'mp3',
+        latency: 'balanced',
+      };
+      if (this.referenceId && this.referenceId.trim() !== '' && this.referenceId !== 'custom') {
+        payload.reference_id = this.referenceId;
+      }
+
       const response = await axios.post(
         'https://api.fish.audio/v1/tts',
-        {
-          text,
-          reference_id: this.referenceId,
-          format: 'mp3',
-          latency: 'balanced',
-        },
+        payload,
         {
           headers: {
             'Authorization': `Bearer ${this.apiKey}`,
@@ -41,6 +45,38 @@ export class FishAudioClient {
       console.error('[FishAudio] ERROR CRÍTICO:', error.response?.data?.toString() || error.message);
       // Retornar buffer vacío en lugar de lanzar error para no tumbar el servidor
       return Buffer.alloc(0);
+    }
+  }
+
+  public async generateDemoMp3(text: string): Promise<Buffer> {
+    console.log(`[FishAudio] Generando Demo MP3 para: "${text.substring(0, 30)}..."`);
+    
+    try {
+      const payload: any = {
+        text,
+        format: 'mp3',
+        latency: 'balanced',
+      };
+      if (this.referenceId && this.referenceId.trim() !== '' && this.referenceId !== 'custom') {
+        payload.reference_id = this.referenceId;
+      }
+
+      const response = await axios.post(
+        'https://api.fish.audio/v1/tts',
+        payload,
+        {
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          responseType: 'arraybuffer',
+        }
+      );
+
+      return Buffer.from(response.data);
+    } catch (error: any) {
+      console.error('[FishAudio] ERROR GENERANDO DEMO:', error.response?.data?.toString() || error.message);
+      throw new Error("Failed to generate demo from FishAudio");
     }
   }
 

@@ -7,9 +7,11 @@ dotenv.config();
 
 export class AiPipeline {
   private groq: Groq;
+  private model: string;
 
-  constructor() {
-    this.groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  constructor(apiKey?: string, model?: string) {
+    this.groq = new Groq({ apiKey: apiKey || process.env.GROQ_API_KEY });
+    this.model = model || 'llama-3.3-70b-versatile';
   }
 
   private createWavHeader(dataLength: number): Buffer {
@@ -73,7 +75,7 @@ export class AiPipeline {
         },
         { role: 'user', content: text },
       ],
-      model: 'llama-3.3-70b-versatile',
+      model: this.model,
       temperature: 0.7,
       stream: false,
     });
