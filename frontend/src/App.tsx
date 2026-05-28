@@ -1370,7 +1370,7 @@ function App() {
                             <td className="px-8 py-5 font-medium text-gray-500">{item.description || '-'}</td>
                             <td className="px-8 py-5 font-bold text-xs text-gray-400">{new Date(item.created_at).toLocaleDateString()}</td>
                             <td className="px-8 py-5 text-right">
-                              <button onClick={() => handleRemoveBlacklist(item.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-xl transition-all font-black text-[10px] uppercase tracking-widest">
+                              <button onClick={() => handleDeleteBlacklist(item.id)} className="text-red-500 hover:bg-red-50 p-2 rounded-xl transition-all font-black text-[10px] uppercase tracking-widest">
                                 ELIMINAR
                               </button>
                             </td>
@@ -1453,7 +1453,7 @@ function App() {
                       </div>
                       <div className="h-48 w-64">
                         <PieChart width={250} height={200}>
-                          <Tooltip formatter={(value: number) => `$${value.toFixed(6)}`} />
+                          <Tooltip formatter={(value: any) => `$${Number(value).toFixed(6)}`} />
                           <Pie
                             data={[
                               { name: 'STT (Deepgram)', value: Number(selectedCall.stt_cost) || 0.000001 },

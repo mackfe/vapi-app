@@ -3,9 +3,9 @@ export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 export async function apiFetch(endpoint: string, options: RequestInit = {}) {
   const token = localStorage.getItem('vox_ia_token');
   
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(options.headers || {})
+    ...(options.headers as Record<string, string> || {})
   };
 
   if (token) {
