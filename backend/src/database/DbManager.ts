@@ -475,10 +475,23 @@ export class DbManager {
 
   public async getAgentByPhone(phoneNumber: string): Promise<any | null> {
     try {
-      const result = await this.pool.query('SELECT * FROM agents WHERE phone_number = $1', [phoneNumber]);
-      return result.rows.length > 0 ? result.rows[0] : null;
+      // Intento 1: Match Exacto
+      let result = await this.pool.query('SELECT * FROM agents WHERE phone_number = $1', [phoneNumber]);
+      if (result.rows.length > 0) return result.rows[0];
+
+      // Intento 2: Match Parcial (Dainus puede enviar 001... u otro prefijo)
+      result = await this.pool.query("SELECT * FROM agents WHERE $1 LIKE '%' || phone_number", [phoneNumber]);
+      if (result.rows.length > 0) return result.rows[0];
+
+      // Intento 3: Fallback si solo hay 1 agente registrado en todo el sistema
+      const allAgents = await this.pool.query('SELECT * FROM agents');
+      if (allAgents.rows.length === 1) {
+        return allAgents.rows[0];
+      }
+
+      return null;
     } catch (error) {
-      console.error(`[DB] Error obteniendo agente por número ${phoneNumber}:`, error);
+      console.error('[DB] Error obteniendo agente por número:', error);
       return null;
     }
   }
