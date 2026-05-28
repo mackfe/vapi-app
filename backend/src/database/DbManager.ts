@@ -106,6 +106,18 @@ export class DbManager {
             sip_domain VARCHAR(100),
             sip_user VARCHAR(50),
             sip_password VARCHAR(100),
+            master_prompt TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+
+      // Tabla para Documentos de RAG
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS agent_documents (
+            id SERIAL PRIMARY KEY,
+            agent_id INTEGER REFERENCES agents(id) ON DELETE CASCADE,
+            filename VARCHAR(255) NOT NULL,
+            extracted_content TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
       `);
@@ -115,6 +127,15 @@ export class DbManager {
         await this.pool.query('ALTER TABLE agents ADD COLUMN IF NOT EXISTS sip_domain VARCHAR(100);');
         await this.pool.query('ALTER TABLE agents ADD COLUMN IF NOT EXISTS sip_user VARCHAR(50);');
         await this.pool.query('ALTER TABLE agents ADD COLUMN IF NOT EXISTS sip_password VARCHAR(100);');
+        await this.pool.query('ALTER TABLE agents ADD COLUMN IF NOT EXISTS master_prompt TEXT;');
+        
+        // Fase 4: Telemetría de Costos
+        await this.pool.query('ALTER TABLE calls ADD COLUMN IF NOT EXISTS stt_cost DECIMAL(10, 6) DEFAULT 0;');
+        await this.pool.query('ALTER TABLE calls ADD COLUMN IF NOT EXISTS llm_cost DECIMAL(10, 6) DEFAULT 0;');
+        await this.pool.query('ALTER TABLE calls ADD COLUMN IF NOT EXISTS tts_cost DECIMAL(10, 6) DEFAULT 0;');
+        await this.pool.query('ALTER TABLE calls ADD COLUMN IF NOT EXISTS llm_tokens INTEGER DEFAULT 0;');
+        await this.pool.query('ALTER TABLE calls ADD COLUMN IF NOT EXISTS tts_chars INTEGER DEFAULT 0;');
+        await this.pool.query('ALTER TABLE calls ADD COLUMN IF NOT EXISTS stt_seconds DECIMAL(10, 2) DEFAULT 0;');
       } catch (e) {
         console.log('[DB] Migraciones omitidas (posiblemente ya existen).');
       }
@@ -138,13 +159,23 @@ export class DbManager {
     }
   }
 
-  public async endCall(id: string, cost: number = 0) {
+  public async endCall(id: string, metrics: { cost: number, sttCost: number, llmCost: number, ttsCost: number, tokens: number, chars: number, seconds: number } = { cost: 0, sttCost: 0, llmCost: 0, ttsCost: 0, tokens: 0, chars: 0, seconds: 0 }) {
     try {
       const result = await this.pool.query(
-        'UPDATE calls SET ended_at = CURRENT_TIMESTAMP, status = $1, cost = $2 WHERE id = $3 AND ended_at IS NULL',
-        ['completed', cost, id]
+        `UPDATE calls 
+         SET ended_at = CURRENT_TIMESTAMP, 
+             status = $1, 
+             cost = $2, 
+             stt_cost = $3, 
+             llm_cost = $4, 
+             tts_cost = $5, 
+             llm_tokens = $6, 
+             tts_chars = $7, 
+             stt_seconds = $8
+         WHERE id = $9 AND ended_at IS NULL`,
+        ['completed', metrics.cost, metrics.sttCost, metrics.llmCost, metrics.ttsCost, metrics.tokens, metrics.chars, metrics.seconds, id]
       );
-      console.log(`[DB] ✅ Llamada finalizada en DB. ID: ${id}, Costo Total: $${cost.toFixed(4)}`);
+      console.log(`[DB] ✅ Llamada finalizada en DB. ID: ${id}, Costo Total: $${metrics.cost.toFixed(4)}`);
     } catch (error) {
       console.error(`[DB] ❌ Error al finalizar llamada (ID: ${id}):`, error);
     }
@@ -506,6 +537,37 @@ export class DbManager {
     } catch (error) {
       console.error(`[DB] Error eliminando agente ${id}:`, error);
       throw error;
+    }
+  }
+
+  public async updateAgentMasterPrompt(id: number, prompt: string): Promise<void> {
+    try {
+      await this.pool.query('UPDATE agents SET master_prompt = $1 WHERE id = $2', [prompt, id]);
+    } catch (error) {
+      console.error(`[DB] Error actualizando master prompt para agente ${id}:`, error);
+      throw error;
+    }
+  }
+
+  public async addAgentDocument(agentId: number, filename: string, content: string): Promise<void> {
+    try {
+      await this.pool.query(
+        'INSERT INTO agent_documents (agent_id, filename, extracted_content) VALUES ($1, $2, $3)',
+        [agentId, filename, content]
+      );
+    } catch (error) {
+      console.error(`[DB] Error añadiendo documento para agente ${agentId}:`, error);
+      throw error;
+    }
+  }
+
+  public async getAgentDocuments(agentId: number): Promise<any[]> {
+    try {
+      const result = await this.pool.query('SELECT * FROM agent_documents WHERE agent_id = $1 ORDER BY created_at DESC', [agentId]);
+      return result.rows;
+    } catch (error) {
+      console.error(`[DB] Error obteniendo documentos para agente ${agentId}:`, error);
+      return [];
     }
   }
 }

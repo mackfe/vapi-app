@@ -18,7 +18,8 @@ import {
   Mail,
   Lock,
   AlertTriangle,
-  Play
+  Play,
+  FileText
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -117,10 +118,19 @@ function App() {
   const [sipStatus, setSipStatus] = useState('connecting');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCall, setSelectedCall] = useState<any>(null);
+  const [callModalTab, setCallModalTab] = useState<'transcripts' | 'finance'>('transcripts');
   const [selectedTranscripts, setSelectedTranscripts] = useState<any[]>([]);
   const [isLoadingTranscripts, setIsLoadingTranscripts] = useState(false);
   const [showCallAlert, setShowCallAlert] = useState(false);
   const [callerId, setCallerId] = useState('');
+
+  // Estados de Base de Conocimiento
+  const [selectedKbAgent, setSelectedKbAgent] = useState<any>(null);
+  const [kbMasterPrompt, setKbMasterPrompt] = useState('');
+  const [kbDocuments, setKbDocuments] = useState<any[]>([]);
+  const [isUploadingKb, setIsUploadingKb] = useState(false);
+  const [isSavingPrompt, setIsSavingPrompt] = useState(false);
+  const [kbFile, setKbFile] = useState<File | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -133,6 +143,9 @@ function App() {
       fetchSecurityMode();
     }
     if (activeTab === 'settings' && settingsTab === 'lines') {
+      fetchAgents();
+    }
+    if (activeTab === 'settings' && settingsTab === 'kb') {
       fetchAgents();
     }
 
@@ -298,12 +311,78 @@ function App() {
     }
   };
 
-  const handleRemoveBlacklist = async (id: number) => {
+  const handleDeleteBlacklist = async (id: number) => {
     try {
       await apiFetch(`/api/blacklist/${id}`, { method: 'DELETE' });
       fetchBlacklist();
     } catch (e) {
-      console.error('Error removing from blacklist');
+      console.error('Error deleting blacklist');
+    }
+  };
+
+  const fetchKbDocuments = async (agentId: number) => {
+    try {
+      const res = await apiFetch(`/api/agents/${agentId}/documents`);
+      const data = await res.json();
+      setKbDocuments(data);
+    } catch (e) {
+      console.error('Error fetching documents');
+    }
+  };
+
+  const handleUpdateMasterPrompt = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedKbAgent) return;
+    setIsSavingPrompt(true);
+    try {
+      await apiFetch(`/api/agents/${selectedKbAgent.id}/master-prompt`, {
+        method: 'PUT',
+        body: JSON.stringify({ master_prompt: kbMasterPrompt })
+      });
+      alert('Master Prompt guardado correctamente');
+      fetchAgents();
+    } catch (e) {
+      alert('Error guardando Master Prompt');
+    } finally {
+      setIsSavingPrompt(false);
+    }
+  };
+
+  const handleUploadDocument = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedKbAgent || !kbFile) return;
+    
+    if (!selectedKbAgent.groq_api_key) {
+      alert('Debe configurar una API Key de Groq para este agente antes de subir documentos (en la pestaña Líneas Telefónicas).');
+      return;
+    }
+
+    setIsUploadingKb(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', kbFile);
+      
+      const token = localStorage.getItem('vox_ia_token');
+      const headers: any = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      
+      // Usamos fetch directamente porque FormData no necesita Content-Type application/json
+      const res = await fetch(`${API_URL}/api/agents/${selectedKbAgent.id}/documents`, {
+        method: 'POST',
+        headers,
+        body: formData
+      });
+      
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error subiendo documento');
+      
+      alert('Documento procesado correctamente');
+      setKbFile(null);
+      fetchKbDocuments(selectedKbAgent.id);
+    } catch (error: any) {
+      alert(error.message || 'Error en la subida. Verifica que el archivo sea menor a 5MB y en formato válido.');
+    } finally {
+      setIsUploadingKb(false);
     }
   };
 
@@ -1095,8 +1174,119 @@ function App() {
               )}
 
               {settingsTab === 'kb' && (
-                <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
-                  <p className="font-bold">Base de Conocimiento - Próximamente (Fase 3)</p>
+                <div className="w-full max-w-5xl mx-auto flex flex-col gap-8">
+                  {/* Selector de Agente */}
+                  <div className="bg-white p-8 rounded-[32px] border border-gray-100 shadow-sm flex flex-col gap-4">
+                    <h3 className="text-xl font-black text-[#2d2d2d]">Seleccionar Agente</h3>
+                    <select
+                      className="w-full px-6 py-4 bg-gray-50 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#e04f39] outline-none font-medium text-sm transition-all cursor-pointer"
+                      value={selectedKbAgent ? selectedKbAgent.id : ''}
+                      onChange={(e) => {
+                        const ag = agents.find(a => a.id === parseInt(e.target.value));
+                        setSelectedKbAgent(ag);
+                        setKbMasterPrompt(ag?.master_prompt || '');
+                        if (ag) fetchKbDocuments(ag.id);
+                      }}
+                    >
+                      <option value="" disabled>Selecciona un agente de la lista...</option>
+                      {agents.map(ag => (
+                        <option key={ag.id} value={ag.id}>{ag.name} ({ag.phone_number})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {selectedKbAgent && (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                      {/* Master Prompt */}
+                      <div className="bg-white p-8 rounded-[32px] border border-gray-100 shadow-sm flex flex-col gap-4">
+                        <div>
+                          <h3 className="text-xl font-black text-[#2d2d2d]">Master Prompt (Personalidad)</h3>
+                          <p className="text-sm text-gray-500 mt-1">Define el rol, el tono y las instrucciones base de este agente.</p>
+                        </div>
+                        <form onSubmit={handleUpdateMasterPrompt} className="flex flex-col gap-4">
+                          <textarea
+                            rows={8}
+                            className="w-full px-6 py-4 bg-gray-50 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#e04f39] outline-none font-medium text-sm transition-all resize-none"
+                            placeholder="Ej: Eres un asistente de reclamos amigable y conciso..."
+                            value={kbMasterPrompt}
+                            onChange={(e) => setKbMasterPrompt(e.target.value)}
+                          />
+                          <button
+                            type="submit"
+                            disabled={isSavingPrompt}
+                            className="py-4 bg-[#e04f39] text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:scale-[1.02] transition-all disabled:opacity-50"
+                          >
+                            {isSavingPrompt ? 'Guardando...' : 'Guardar Master Prompt'}
+                          </button>
+                        </form>
+                      </div>
+
+                      {/* Ingesta de RAG */}
+                      <div className="bg-white p-8 rounded-[32px] border border-gray-100 shadow-sm flex flex-col gap-4">
+                        <div>
+                          <h3 className="text-xl font-black text-[#2d2d2d]">Ingesta de Documentos (RAG)</h3>
+                          <p className="text-sm text-gray-500 mt-1">Sube PDFs o DOCX para entrenar a la IA con datos específicos.</p>
+                        </div>
+                        <form onSubmit={handleUploadDocument} className="flex flex-col gap-4">
+                          <div className="border-2 border-dashed border-gray-200 rounded-2xl p-6 text-center hover:bg-gray-50 transition-colors cursor-pointer relative">
+                            <input 
+                              type="file" 
+                              accept=".pdf,.docx" 
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                              onChange={(e) => setKbFile(e.target.files ? e.target.files[0] : null)}
+                            />
+                            {kbFile ? (
+                              <p className="font-bold text-[#e04f39]">{kbFile.name}</p>
+                            ) : (
+                              <p className="font-medium text-gray-500">Arrastra o haz clic para subir (.pdf, .docx, max 5MB)</p>
+                            )}
+                          </div>
+                          
+                          <button
+                            type="submit"
+                            disabled={!kbFile || isUploadingKb}
+                            className="py-4 bg-blue-500 text-white rounded-2xl font-black text-sm uppercase tracking-widest shadow-lg shadow-blue-100 hover:scale-[1.02] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                          >
+                            {isUploadingKb ? (
+                              <>
+                                <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></span>
+                                Procesando con IA...
+                              </>
+                            ) : (
+                              'Subir y Procesar Documento'
+                            )}
+                          </button>
+                        </form>
+                      </div>
+
+                      {/* Auditoria Visual */}
+                      <div className="lg:col-span-2 bg-white p-8 rounded-[32px] border border-gray-100 shadow-sm flex flex-col gap-4">
+                        <h3 className="text-xl font-black text-[#2d2d2d]">Documentos Ingeridos</h3>
+                        {kbDocuments.length === 0 ? (
+                          <p className="text-gray-400 text-center py-8 font-medium">Este agente aún no tiene documentos en su base de conocimiento.</p>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {kbDocuments.map((doc: any) => (
+                              <div key={doc.id} className="bg-gray-50 p-6 rounded-2xl border border-gray-200">
+                                <div className="flex items-center gap-3 mb-3">
+                                  <div className="w-10 h-10 bg-[#e04f39]/10 rounded-xl flex items-center justify-center">
+                                    <FileText size={18} className="text-[#e04f39]" />
+                                  </div>
+                                  <div>
+                                    <p className="font-bold text-sm text-[#2d2d2d] truncate">{doc.filename}</p>
+                                    <p className="text-[10px] text-gray-500 font-bold tracking-widest uppercase">{new Date(doc.created_at).toLocaleDateString()}</p>
+                                  </div>
+                                </div>
+                                <div className="bg-white p-4 rounded-xl border border-gray-100 h-32 overflow-y-auto">
+                                  <p className="text-xs text-gray-600 whitespace-pre-wrap">{doc.extracted_content}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1205,32 +1395,115 @@ function App() {
         </AnimatePresence>
       </main>
 
-      {/* Modal Transcripts */}
+      {/* Modal Transcripts / Finance */}
       <AnimatePresence>
         {selectedCall && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-gray-900/40 backdrop-blur-md">
             <motion.div initial={{ scale: 0.9, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0, y: 20 }} className="bg-white w-full max-w-3xl rounded-[40px] shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
-              <div className="p-8 border-b border-gray-100 flex items-center justify-between">
-                <div>
-                  <h3 className="text-2xl font-black text-[#2d2d2d] mb-1">Transcripción Detallada</h3>
-                  <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">{selectedCall.caller_id}</p>
-                </div>
-                <button onClick={() => setSelectedCall(null)} className="p-3 hover:bg-gray-100 rounded-2xl transition-all"><X /></button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-gray-50/50">
-                {isLoadingTranscripts ? (
-                  <div className="h-64 flex items-center justify-center">
-                    <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
+              <div className="p-8 border-b border-gray-100">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h3 className="text-2xl font-black text-[#2d2d2d] mb-1">Detalles de la Llamada</h3>
+                    <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">{selectedCall.caller_id}</p>
                   </div>
-                ) : (
-                  selectedTranscripts.map((t, i) => (
-                    <div key={i} className={`flex flex-col ${t.role === 'user' ? 'items-start' : 'items-end'}`}>
-                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 px-2">{t.role === 'user' ? 'Vecino' : 'IA Municipio'}</span>
-                      <div className={`p-6 rounded-[32px] max-w-[80%] text-sm leading-relaxed ${t.role === 'user' ? 'bg-white border border-gray-200 text-gray-700 rounded-tl-none shadow-sm' : 'bg-[#e04f39] text-white rounded-tr-none shadow-lg shadow-orange-100'}`}>
-                        {t.content}
+                  <button onClick={() => setSelectedCall(null)} className="p-3 hover:bg-gray-100 rounded-2xl transition-all"><X /></button>
+                </div>
+                
+                {/* Tabs */}
+                <div className="flex bg-gray-50 p-2 rounded-2xl w-full">
+                  <button
+                    onClick={() => setCallModalTab('transcripts')}
+                    className={`flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${callModalTab === 'transcripts' ? 'bg-white shadow-sm text-[#e04f39]' : 'text-gray-400 hover:text-gray-600'}`}
+                  >
+                    Transcripción
+                  </button>
+                  <button
+                    onClick={() => setCallModalTab('finance')}
+                    className={`flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${callModalTab === 'finance' ? 'bg-white shadow-sm text-[#e04f39]' : 'text-gray-400 hover:text-gray-600'}`}
+                  >
+                    Auditoría Financiera
+                  </button>
+                </div>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-gray-50/50">
+                {callModalTab === 'transcripts' && (
+                  isLoadingTranscripts ? (
+                    <div className="h-64 flex items-center justify-center">
+                      <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  ) : (
+                    selectedTranscripts.map((t, i) => (
+                      <div key={i} className={`flex flex-col ${t.role === 'user' ? 'items-start' : 'items-end'}`}>
+                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 px-2">{t.role === 'user' ? 'Vecino' : 'IA Municipio'}</span>
+                        <div className={`p-6 rounded-[32px] max-w-[80%] text-sm leading-relaxed ${t.role === 'user' ? 'bg-white border border-gray-200 text-gray-700 rounded-tl-none shadow-sm' : 'bg-[#e04f39] text-white rounded-tr-none shadow-lg shadow-orange-100'}`}>
+                          {t.content}
+                        </div>
+                      </div>
+                    ))
+                  )
+                )}
+
+                {callModalTab === 'finance' && (
+                  <div className="flex flex-col items-center justify-center space-y-8">
+                    <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 w-full flex justify-between items-center">
+                      <div>
+                        <p className="text-sm font-bold text-gray-400">Costo Total (USD)</p>
+                        <p className="text-3xl font-black text-[#e04f39]">${Number(selectedCall.cost).toFixed(6)}</p>
+                      </div>
+                      <div className="h-48 w-64">
+                        <PieChart width={250} height={200}>
+                          <Tooltip formatter={(value: number) => `$${value.toFixed(6)}`} />
+                          <Pie
+                            data={[
+                              { name: 'STT (Deepgram)', value: Number(selectedCall.stt_cost) || 0.000001 },
+                              { name: 'LLM (Groq)', value: Number(selectedCall.llm_cost) || 0.000001 },
+                              { name: 'TTS (FishAudio)', value: Number(selectedCall.tts_cost) || 0.000001 }
+                            ]}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={60}
+                            outerRadius={80}
+                            paddingAngle={5}
+                            dataKey="value"
+                          >
+                            <Cell fill="#3b82f6" />
+                            <Cell fill="#10b981" />
+                            <Cell fill="#e04f39" />
+                          </Pie>
+                        </PieChart>
                       </div>
                     </div>
-                  ))
+
+                    <div className="grid grid-cols-3 gap-4 w-full">
+                      <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+                          <h4 className="text-xs font-black uppercase tracking-widest text-gray-500">STT</h4>
+                        </div>
+                        <p className="text-xl font-black text-[#2d2d2d]">${Number(selectedCall.stt_cost).toFixed(6)}</p>
+                        <p className="text-xs font-medium text-gray-400 mt-1">{Number(selectedCall.stt_seconds).toFixed(2)} Segundos</p>
+                      </div>
+
+                      <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
+                          <h4 className="text-xs font-black uppercase tracking-widest text-gray-500">LLM</h4>
+                        </div>
+                        <p className="text-xl font-black text-[#2d2d2d]">${Number(selectedCall.llm_cost).toFixed(6)}</p>
+                        <p className="text-xs font-medium text-gray-400 mt-1">{selectedCall.llm_tokens} Tokens</p>
+                      </div>
+
+                      <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-3 h-3 rounded-full bg-[#e04f39]"></div>
+                          <h4 className="text-xs font-black uppercase tracking-widest text-gray-500">TTS</h4>
+                        </div>
+                        <p className="text-xl font-black text-[#2d2d2d]">${Number(selectedCall.tts_cost).toFixed(6)}</p>
+                        <p className="text-xs font-medium text-gray-400 mt-1">{selectedCall.tts_chars} Caracteres</p>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
             </motion.div>

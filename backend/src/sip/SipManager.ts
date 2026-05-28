@@ -229,8 +229,11 @@ export class SipManager {
       return;
     }
 
-    // [NUEVO] Instanciación Aislada de IA
-    const callAi = new AiPipeline(agent.groq_api_key, agent.ai_model);
+    const docs = await this.db.getAgentDocuments(agent.id);
+    const knowledgeContext = docs.map(d => d.extracted_content).join('\n\n');
+
+    // [NUEVO] Instanciación Aislada de IA con Contexto Dinámico
+    const callAi = new AiPipeline(agent.groq_api_key, agent.ai_model, agent.master_prompt, knowledgeContext);
     const callTts = new FishAudioClient(agent.fishaudio_api_key, agent.voice_reference_id);
 
     this.callId = uuidv4();
@@ -244,7 +247,7 @@ export class SipManager {
     let audioBuffer = Buffer.alloc(0);
     let silenceTimer: NodeJS.Timeout | null = null;
     let isAiSpeaking = false;
-    let totalCallCost = 0;
+    let metrics = { cost: 0, sttCost: 0, llmCost: 0, ttsCost: 0, tokens: 0, chars: 0, seconds: 0 };
 
     // Precios de referencia
     const PRICES = {
@@ -280,19 +283,24 @@ export class SipManager {
             // 1. Costo STT (Deepgram)
             const durationSec = currentBuffer.length / 16000;
             const costStt = (durationSec / 60) * PRICES.STT_PER_MIN;
-            totalCallCost += costStt;
+            metrics.sttCost += costStt;
+            metrics.seconds += durationSec;
+            metrics.cost += costStt;
 
             const text = await callAi.getTranscription(currentBuffer);
             if (text && text.trim().length > 1) {
               isAiSpeaking = true;
               if (this.io) this.io.emit('transcription', `Vecino: ${text}`);
               
-              const response = await callAi.getAiResponse(text);
+              const aiResult = await callAi.getAiResponse(text);
+              const response = aiResult.text;
               
-              // 2. Costo LLM (Groq) - Estimación tokens: palabras * 1.3
-              const tokens = response.split(' ').length * 1.3;
+              // 2. Costo LLM (Groq)
+              const tokens = aiResult.tokens;
               const costLlm = (tokens / 1000000) * PRICES.LLM_PER_1M_TOKENS;
-              totalCallCost += costLlm;
+              metrics.llmCost += costLlm;
+              metrics.tokens += tokens;
+              metrics.cost += costLlm;
 
               if (this.io) this.io.emit('transcription', `IA: ${response}`);
               
@@ -301,7 +309,9 @@ export class SipManager {
               
               // 3. Costo TTS (FishAudio)
               const costTts = (response.length / 1000000) * PRICES.TTS_PER_1M_CHARS;
-              totalCallCost += costTts;
+              metrics.ttsCost += costTts;
+              metrics.chars += response.length;
+              metrics.cost += costTts;
 
               const audioResponse = await callTts.textToSpeech(response);
               if (this.io) this.io.emit('audio-chunk', audioResponse);
@@ -314,7 +324,7 @@ export class SipManager {
                 isAiSpeaking = false;
               }
               
-              console.log(`[COST] Costo acumulado de la llamada: $${totalCallCost.toFixed(6)}`);
+              console.log(`[COST] Costo acumulado de la llamada: $${metrics.cost.toFixed(6)}`);
             }
           } else {
              audioBuffer = Buffer.alloc(0);
@@ -330,9 +340,12 @@ export class SipManager {
       isAiSpeaking = true;
       
       // Costo Bienvenida (Solo TTS)
-      totalCallCost += (welcome.length / 1000000) * PRICES.TTS_PER_1M_CHARS;
+      const costTts = (welcome.length / 1000000) * PRICES.TTS_PER_1M_CHARS;
+      metrics.ttsCost += costTts;
+      metrics.chars += welcome.length;
+      metrics.cost += costTts;
 
-      const audio = await this.tts.textToSpeech(welcome);
+      const audio = await callTts.textToSpeech(welcome);
       if (this.rtp && audio.length > 0) {
         this.rtp.sendAudio(audio);
         await this.db.saveTranscript(this.callId, 'ai', welcome);
@@ -343,7 +356,7 @@ export class SipManager {
     }, 1500);
 
     // Guardamos la referencia de costo en la instancia para usarla en handleBye
-    (this as any).currentCallCost = () => totalCallCost;
+    (this as any).currentCallMetrics = () => metrics;
   }
 
   private async handleBye(request: any) {
@@ -351,10 +364,10 @@ export class SipManager {
     this.sipStack.send(this.sipStack.makeResponse(request, 200, 'OK'));
     
     // Recuperar costo acumulado
-    const finalCost = (this as any).currentCallCost ? (this as any).currentCallCost() : 0;
+    const finalMetrics = (this as any).currentCallMetrics ? (this as any).currentCallMetrics() : { cost: 0, sttCost: 0, llmCost: 0, ttsCost: 0, tokens: 0, chars: 0, seconds: 0 };
 
     // Registrar fin de llamada con costo
-    await this.db.endCall(this.callId, finalCost);
+    await this.db.endCall(this.callId, finalMetrics);
     
     // [NUEVO] Generar Ticket AI Automáticamente
     this.generateCallTicket(this.callId).catch(err => console.error('[Ticket] Fail:', err));

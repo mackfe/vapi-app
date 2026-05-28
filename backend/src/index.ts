@@ -10,12 +10,27 @@ import { SipManager } from './sip/SipManager.js';
 import { AiPipeline } from './ai/Pipeline.js';
 import { FishAudioClient } from './ai/FishAudioClient.js';
 import { TicketGenerator } from './ai/TicketGenerator.js';
+import multer from 'multer';
+import mammoth from 'mammoth';
+import Groq from 'groq-sdk';
+import pdf from 'pdf-parse-new';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET || 'vox-ia-super-secret-2024';
+
+const upload = multer({ 
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (req: any, file: any, cb: any) => {
+    if (file.mimetype === 'application/pdf' || file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      cb(null, true);
+    } else {
+      cb(new Error('Formato no soportado. Sólo PDF o DOCX.'));
+    }
+  }
+});
 
 // 1. Endpoint de Login Estático
 app.post('/api/login', (req: any, res: any) => {
@@ -201,6 +216,69 @@ app.delete('/api/agents/:id', async (req, res) => {
 
 io.on('connection', (socket) => {
   console.log('[Dashboard] Cliente conectado');
+});
+
+app.put('/api/agents/:id/master-prompt', async (req, res) => {
+  try {
+    await sip.getDb().updateAgentMasterPrompt(parseInt(req.params.id), req.body.master_prompt);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Error actualizando master prompt' });
+  }
+});
+
+app.get('/api/agents/:id/documents', async (req, res) => {
+  try {
+    const docs = await sip.getDb().getAgentDocuments(parseInt(req.params.id));
+    res.json(docs);
+  } catch (error) {
+    res.status(500).json({ error: 'Error obteniendo documentos' });
+  }
+});
+
+app.post('/api/agents/:id/documents', upload.single('file'), async (req: any, res: any) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No se subió ningún archivo' });
+    
+    const agentId = parseInt(req.params.id);
+    const agent = await sip.getDb().getAgents().then(agents => agents.find(a => a.id === agentId));
+    if (!agent) return res.status(404).json({ error: 'Agente no encontrado' });
+    if (!agent.groq_api_key) return res.status(400).json({ error: 'Debe configurar una API Key de Groq para este agente antes de subir documentos' });
+
+    let rawText = '';
+    if (req.file.mimetype === 'application/pdf') {
+      const pdfData = await pdf(req.file.buffer);
+      rawText = pdfData.text;
+    } else {
+      const docxData = await mammoth.extractRawText({ buffer: req.file.buffer });
+      rawText = docxData.value;
+    }
+
+    if (!rawText.trim()) {
+      return res.status(400).json({ error: 'No se pudo extraer texto del archivo' });
+    }
+
+    const groq = new Groq({ apiKey: agent.groq_api_key });
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: "Actúa como un estructurador de datos. Resume y organiza este texto de forma que un Agente Telefónico de IA pueda consumirlo fácil y rápidamente como base de conocimiento. Mantén todos los datos duros, horarios y reglas."
+        },
+        { role: "user", content: rawText }
+      ],
+      model: "llama-3.3-70b-versatile",
+      temperature: 0.1
+    });
+
+    const extractedContent = chatCompletion.choices[0]?.message?.content || rawText.substring(0, 500);
+
+    await sip.getDb().addAgentDocument(agentId, req.file.originalname, extractedContent);
+    res.json({ success: true, message: 'Documento procesado correctamente' });
+  } catch (error: any) {
+    console.error('[Upload] Error procesando documento:', error);
+    res.status(500).json({ error: error.message || 'Error interno procesando documento' });
+  }
 });
 
 

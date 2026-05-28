@@ -1,17 +1,20 @@
 import axios from 'axios';
 import Groq from 'groq-sdk';
 import * as dotenv from 'dotenv';
-import { MUNICIPAL_KNOWLEDGE } from './knowledge.js';
 
 dotenv.config();
 
 export class AiPipeline {
   private groq: Groq;
   private model: string;
+  private masterPrompt: string;
+  private knowledgeContext: string;
 
-  constructor(apiKey?: string, model?: string) {
+  constructor(apiKey?: string, model?: string, masterPrompt?: string, knowledgeContext?: string) {
     this.groq = new Groq({ apiKey: apiKey || process.env.GROQ_API_KEY });
     this.model = model || 'llama-3.3-70b-versatile';
+    this.masterPrompt = masterPrompt || 'Eres un asistente de voz amable y profesional.';
+    this.knowledgeContext = knowledgeContext || '';
   }
 
   private createWavHeader(dataLength: number): Buffer {
@@ -61,8 +64,7 @@ export class AiPipeline {
       messages: [
         { 
           role: 'system', 
-          content: `Eres un asistente de voz amable y profesional del Municipio de 3 de Febrero.
-          Tu objetivo es ayudar a los vecinos con temas de árboles, poda y restos verdes.
+          content: `${this.masterPrompt}
           
           REGLAS DE ORO:
           1. Usa lenguaje claro, breve y oral. Frases cortas. Una idea por oración.
@@ -70,8 +72,8 @@ export class AiPipeline {
           3. No prometas aprobaciones ni resoluciones.
           4. Si la información no está en la base de datos, indica que no está especificado.
           
-          BASE DE CONOCIMIENTO:
-          ${MUNICIPAL_KNOWLEDGE}`
+          BASE DE CONOCIMIENTO (Contexto):
+          ${this.knowledgeContext}`
         },
         { role: 'user', content: text },
       ],
@@ -80,6 +82,9 @@ export class AiPipeline {
       stream: false,
     });
 
-    return chatCompletion.choices[0]?.message?.content || "Lo siento, no pude procesar eso.";
+    return {
+      text: chatCompletion.choices[0]?.message?.content || "Lo siento, no pude procesar eso.",
+      tokens: chatCompletion.usage?.total_tokens || 0
+    };
   }
 }
