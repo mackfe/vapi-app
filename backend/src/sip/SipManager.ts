@@ -161,8 +161,15 @@ export class SipManager {
 
     // Extraer IP y Puerto remoto del SDP del INVITE
     const remoteSdp = request.content || '';
-    const ipMatch = remoteSdp.match(/c=IN IP4 ([0-9.]+)/);
+    let ipMatch = remoteSdp.match(/c=IN IP4 ([0-9.]+)/);
     const portMatch = remoteSdp.match(/m=audio ([0-9]+)/);
+    
+    if (ipMatch && ipMatch[1] === '0.0.0.0') {
+      console.warn('[SIP] Advertencia: SDP remoto con IP 0.0.0.0. Infiriendo desde Via...');
+      if (request.headers?.via?.[0]?.host) {
+        ipMatch = [ipMatch[0], request.headers.via[0].host];
+      }
+    }
     
     if (ipMatch && portMatch) {
       this.rtp.setRemote(ipMatch[1], parseInt(portMatch[1], 10));
@@ -363,12 +370,17 @@ export class SipManager {
       metrics.chars += welcome.length;
       metrics.cost += costTts;
 
-      const audio = await callTts.textToSpeech(welcome);
-      if (this.rtp && audio.length > 0) {
-        this.rtp.sendAudio(audio);
-        await this.db.saveTranscript(this.callId, 'ai', welcome);
-        setTimeout(() => { this.isAiSpeaking = false; }, (audio.length / 16000) * 1000 + 500);
-      } else {
+      try {
+        const audio = await callTts.textToSpeech(welcome);
+        if (this.rtp && audio.length > 0) {
+          this.rtp.sendAudio(audio);
+          await this.db.saveTranscript(this.callId, 'ai', welcome);
+          setTimeout(() => { this.isAiSpeaking = false; }, (audio.length / 16000) * 1000 + 500);
+        } else {
+          this.isAiSpeaking = false;
+        }
+      } catch (err) {
+        console.error('[SIP] Error en TTS de Bienvenida:', err);
         this.isAiSpeaking = false;
       }
     }, 3000);
