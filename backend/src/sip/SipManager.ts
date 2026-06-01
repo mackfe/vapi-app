@@ -284,53 +284,59 @@ export class SipManager {
             const currentBuffer = this.audioBuffer;
             this.audioBuffer = Buffer.alloc(0);
             
-            // 1. Costo STT (Deepgram)
-            const durationSec = currentBuffer.length / 16000;
-            const costStt = (durationSec / 60) * PRICES.STT_PER_MIN;
-            metrics.sttCost += costStt;
-            metrics.seconds += durationSec;
-            metrics.cost += costStt;
+            try {
+              // 1. Costo STT (Deepgram)
+              const durationSec = currentBuffer.length / 16000;
+              const costStt = (durationSec / 60) * PRICES.STT_PER_MIN;
+              metrics.sttCost += costStt;
+              metrics.seconds += durationSec;
+              metrics.cost += costStt;
 
-            const text = await callAi.getTranscription(currentBuffer);
-            if (text && text.trim().length > 1) {
-              this.isAiSpeaking = true;
-              if (this.io) this.io.emit('transcription', `Vecino: ${text}`);
-              
-              const aiResult = await callAi.getAiResponse(text);
-              const response = aiResult.text;
-              
-              // 2. Costo LLM (Groq)
-              const tokens = aiResult.tokens;
-              const costLlm = (tokens / 1000000) * PRICES.LLM_PER_1M_TOKENS;
-              metrics.llmCost += costLlm;
-              metrics.tokens += tokens;
-              metrics.cost += costLlm;
+              const text = await callAi.getTranscription(currentBuffer);
+              if (text && text.trim().length > 1) {
+                this.isAiSpeaking = true;
+                if (this.io) this.io.emit('transcription', `Vecino: ${text}`);
+                
+                const aiResult = await callAi.getAiResponse(text);
+                const response = aiResult.text;
+                
+                // 2. Costo LLM (Groq)
+                const tokens = aiResult.tokens;
+                const costLlm = (tokens / 1000000) * PRICES.LLM_PER_1M_TOKENS;
+                metrics.llmCost += costLlm;
+                metrics.tokens += tokens;
+                metrics.cost += costLlm;
 
-              if (this.io) this.io.emit('transcription', `IA: ${response}`);
-              
-              await this.db.saveTranscript(this.callId, 'user', text);
-              await this.db.saveTranscript(this.callId, 'ai', response);
-              
-              // 3. Costo TTS (FishAudio)
-              const costTts = (response.length / 1000000) * PRICES.TTS_PER_1M_CHARS;
-              metrics.ttsCost += costTts;
-              metrics.chars += response.length;
-              metrics.cost += costTts;
+                if (this.io) this.io.emit('transcription', `IA: ${response}`);
+                
+                await this.db.saveTranscript(this.callId, 'user', text);
+                await this.db.saveTranscript(this.callId, 'ai', response);
+                
+                // 3. Costo TTS (FishAudio)
+                const costTts = (response.length / 1000000) * PRICES.TTS_PER_1M_CHARS;
+                metrics.ttsCost += costTts;
+                metrics.chars += response.length;
+                metrics.cost += costTts;
 
-              const audioResponse = await callTts.textToSpeech(response);
-              if (this.io) this.io.emit('audio-chunk', audioResponse);
-              
-              if (this.rtp && audioResponse.length > 0) {
-                this.rtp.sendAudio(audioResponse);
-                const playDuration = (audioResponse.length / 16000) * 1000 + 500;
-                setTimeout(() => { this.isAiSpeaking = false; }, playDuration);
+                const audioResponse = await callTts.textToSpeech(response);
+                if (this.io) this.io.emit('audio-chunk', audioResponse);
+                
+                if (this.rtp && audioResponse.length > 0) {
+                  this.rtp.sendAudio(audioResponse);
+                  const playDuration = (audioResponse.length / 16000) * 1000 + 500;
+                  setTimeout(() => { this.isAiSpeaking = false; }, playDuration);
+                } else {
+                  this.isAiSpeaking = false;
+                }
+                
+                console.log(`[COST] Costo acumulado de la llamada: $${metrics.cost.toFixed(6)}`);
               } else {
                 this.isAiSpeaking = false;
               }
-              
-              console.log(`[COST] Costo acumulado de la llamada: $${metrics.cost.toFixed(6)}`);
-            } else {
+            } catch (err) {
+              console.error('[SIP] Error en el pipeline de IA (STT/LLM/TTS):', err);
               this.isAiSpeaking = false;
+              this.audioBuffer = Buffer.alloc(0);
             }
           } else {
              this.audioBuffer = Buffer.alloc(0);

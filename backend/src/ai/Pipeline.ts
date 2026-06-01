@@ -79,6 +79,12 @@ export class AiPipeline {
     console.log(`[Groq] Pensando respuesta para: "${text}"...`);
     
     this.messages.push({ role: 'user', content: text });
+    
+    // 2. Límite de Memoria Conversacional (Sliding Window)
+    // Mantener [0] (system) y eliminar los más antiguos ([1] y [2]) si supera 15
+    if (this.messages.length > 15) {
+      this.messages.splice(1, 2);
+    }
 
     const chatCompletion = await this.groq.chat.completions.create({
       messages: this.messages,
