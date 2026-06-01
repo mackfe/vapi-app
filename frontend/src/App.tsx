@@ -917,7 +917,7 @@ function App() {
                     <button 
                       onClick={() => {
                         setEditingFullAgentId(null);
-                        setNewAgent({ name: '', phone_number: '', ai_model: 'llama-3.3-70b-versatile', groq_api_key: '', fishaudio_api_key: '', voice_reference_id: FISH_VOICES[0].id, sip_domain: '', sip_user: '', sip_password: '' });
+                        setNewAgent({ name: '', department: '', phone_number: '', ai_model: 'llama-3.3-70b-versatile', groq_api_key: '', fishaudio_api_key: '', voice_reference_id: FISH_VOICES[0].id, sip_domain: '', sip_user: '', sip_password: '' });
                         setShowAgentModal(true);
                       }} 
                       className="bg-[#e04f39] text-white px-8 py-4 rounded-2xl font-black text-sm shadow-lg shadow-orange-100 hover:scale-105 transition-all"
