@@ -26,6 +26,11 @@ export class SipManager {
   private db: DbManager;
   private io: any;
 
+  // Estado de Llamada (VAD)
+  private audioBuffer: Buffer = Buffer.alloc(0);
+  private silenceTimer: NodeJS.Timeout | null = null;
+  private isAiSpeaking: boolean = false;
+
   constructor(io?: any) {
     this.sipStack = sip;
     this.ticketGen = new TicketGenerator();
@@ -244,9 +249,8 @@ export class SipManager {
     await this.db.createCall(this.callId, callerId);
 
     // Estado para manejo de voz y costos
-    let audioBuffer = Buffer.alloc(0);
-    let silenceTimer: NodeJS.Timeout | null = null;
-    let isAiSpeaking = false;
+    this.audioBuffer = Buffer.alloc(0);
+    this.isAiSpeaking = false;
     let metrics = { cost: 0, sttCost: 0, llmCost: 0, ttsCost: 0, tokens: 0, chars: 0, seconds: 0 };
 
     // Precios de referencia
@@ -267,18 +271,18 @@ export class SipManager {
     };
 
     this.rtp.on('audio', async (data) => {
-      if (isAiSpeaking) return;
+      if (this.isAiSpeaking) return;
       const energy = calculateEnergy(data);
       if (this.io) this.io.emit('audio-chunk', data);
       
       if (energy > 0.005) {
-        audioBuffer = Buffer.concat([audioBuffer, data]);
-        if (silenceTimer) clearTimeout(silenceTimer);
+        this.audioBuffer = Buffer.concat([this.audioBuffer, data]);
+        if (this.silenceTimer) clearTimeout(this.silenceTimer);
         
-        silenceTimer = setTimeout(async () => {
-          if (audioBuffer.length > 4000) {
-            const currentBuffer = audioBuffer;
-            audioBuffer = Buffer.alloc(0);
+        this.silenceTimer = setTimeout(async () => {
+          if (this.audioBuffer.length > 16000) {
+            const currentBuffer = this.audioBuffer;
+            this.audioBuffer = Buffer.alloc(0);
             
             // 1. Costo STT (Deepgram)
             const durationSec = currentBuffer.length / 16000;
@@ -289,7 +293,7 @@ export class SipManager {
 
             const text = await callAi.getTranscription(currentBuffer);
             if (text && text.trim().length > 1) {
-              isAiSpeaking = true;
+              this.isAiSpeaking = true;
               if (this.io) this.io.emit('transcription', `Vecino: ${text}`);
               
               const aiResult = await callAi.getAiResponse(text);
@@ -319,17 +323,19 @@ export class SipManager {
               if (this.rtp && audioResponse.length > 0) {
                 this.rtp.sendAudio(audioResponse);
                 const playDuration = (audioResponse.length / 16000) * 1000 + 500;
-                setTimeout(() => { isAiSpeaking = false; }, playDuration);
+                setTimeout(() => { this.isAiSpeaking = false; }, playDuration);
               } else {
-                isAiSpeaking = false;
+                this.isAiSpeaking = false;
               }
               
               console.log(`[COST] Costo acumulado de la llamada: $${metrics.cost.toFixed(6)}`);
+            } else {
+              this.isAiSpeaking = false;
             }
           } else {
-             audioBuffer = Buffer.alloc(0);
+             this.audioBuffer = Buffer.alloc(0);
           }
-        }, 1000);
+        }, 2500);
       }
     });
 
@@ -337,7 +343,7 @@ export class SipManager {
     setTimeout(async () => {
       const welcome = "Hola, bienvenido a la línea de atención del Municipio de 3 de Febrero. ¿En qué puedo ayudarte?";
       if (this.io) this.io.emit('transcription', `IA: ${welcome}`);
-      isAiSpeaking = true;
+      this.isAiSpeaking = true;
       
       // Costo Bienvenida (Solo TTS)
       const costTts = (welcome.length / 1000000) * PRICES.TTS_PER_1M_CHARS;
@@ -349,9 +355,9 @@ export class SipManager {
       if (this.rtp && audio.length > 0) {
         this.rtp.sendAudio(audio);
         await this.db.saveTranscript(this.callId, 'ai', welcome);
-        setTimeout(() => { isAiSpeaking = false; }, (audio.length / 16000) * 1000 + 500);
+        setTimeout(() => { this.isAiSpeaking = false; }, (audio.length / 16000) * 1000 + 500);
       } else {
-        isAiSpeaking = false;
+        this.isAiSpeaking = false;
       }
     }, 1500);
 
@@ -372,8 +378,14 @@ export class SipManager {
     // [NUEVO] Generar Ticket AI Automáticamente
     this.generateCallTicket(this.callId).catch(err => console.error('[Ticket] Fail:', err));
 
-    // Limpiar estado
-    this.rtpServer?.close();
+    // Limpiar estado y fugas de memoria
+    if (this.silenceTimer) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
+    }
+    this.isAiSpeaking = false;
+    this.audioBuffer = Buffer.alloc(0);
+
     if (this.rtp) this.rtp.stop();
     if (this.io) this.io.emit('call-ended');
   }

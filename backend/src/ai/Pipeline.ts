@@ -9,12 +9,29 @@ export class AiPipeline {
   private model: string;
   private masterPrompt: string;
   private knowledgeContext: string;
+  private messages: any[] = [];
 
   constructor(apiKey?: string, model?: string, masterPrompt?: string, knowledgeContext?: string) {
     this.groq = new Groq({ apiKey: apiKey || process.env.GROQ_API_KEY });
     this.model = model || 'llama-3.3-70b-versatile';
     this.masterPrompt = masterPrompt || 'Eres un asistente de voz amable y profesional.';
     this.knowledgeContext = knowledgeContext || '';
+
+    this.messages = [
+      { 
+        role: 'system', 
+        content: `${this.masterPrompt}
+        
+        REGLAS DE ORO:
+        1. Usa lenguaje claro, breve y oral. Frases cortas. Una idea por oración.
+        2. Pide un solo dato por vez.
+        3. No prometas aprobaciones ni resoluciones.
+        4. Si la información no está en la base de datos, indica que no está especificado.
+        
+        BASE DE CONOCIMIENTO (Contexto):
+        ${this.knowledgeContext}`
+      }
+    ];
   }
 
   private createWavHeader(dataLength: number): Buffer {
@@ -60,30 +77,21 @@ export class AiPipeline {
 
   public async getAiResponse(text: string) {
     console.log(`[Groq] Pensando respuesta para: "${text}"...`);
+    
+    this.messages.push({ role: 'user', content: text });
+
     const chatCompletion = await this.groq.chat.completions.create({
-      messages: [
-        { 
-          role: 'system', 
-          content: `${this.masterPrompt}
-          
-          REGLAS DE ORO:
-          1. Usa lenguaje claro, breve y oral. Frases cortas. Una idea por oración.
-          2. Pide un solo dato por vez.
-          3. No prometas aprobaciones ni resoluciones.
-          4. Si la información no está en la base de datos, indica que no está especificado.
-          
-          BASE DE CONOCIMIENTO (Contexto):
-          ${this.knowledgeContext}`
-        },
-        { role: 'user', content: text },
-      ],
+      messages: this.messages,
       model: this.model,
       temperature: 0.7,
       stream: false,
     });
 
+    const aiResponse = chatCompletion.choices[0]?.message?.content || "Lo siento, no pude procesar eso.";
+    this.messages.push({ role: 'assistant', content: aiResponse });
+
     return {
-      text: chatCompletion.choices[0]?.message?.content || "Lo siento, no pude procesar eso.",
+      text: aiResponse,
       tokens: chatCompletion.usage?.total_tokens || 0
     };
   }
