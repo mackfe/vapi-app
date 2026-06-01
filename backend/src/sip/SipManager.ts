@@ -280,7 +280,7 @@ export class SipManager {
         if (this.silenceTimer) clearTimeout(this.silenceTimer);
         
         this.silenceTimer = setTimeout(async () => {
-          if (this.audioBuffer.length > 16000) {
+          if (this.audioBuffer.length > 4000) {
             const currentBuffer = this.audioBuffer;
             this.audioBuffer = Buffer.alloc(0);
             
@@ -359,7 +359,7 @@ export class SipManager {
       } else {
         this.isAiSpeaking = false;
       }
-    }, 1500);
+    }, 3000);
 
     // Guardamos la referencia de costo en la instancia para usarla en handleBye
     (this as any).currentCallMetrics = () => metrics;

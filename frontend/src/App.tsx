@@ -1436,8 +1436,11 @@ function App() {
                     selectedTranscripts.map((t, i) => (
                       <div key={i} className={`flex flex-col ${t.role === 'user' ? 'items-start' : 'items-end'}`}>
                         <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 px-2">{t.role === 'user' ? 'Vecino' : 'IA Municipio'}</span>
-                        <div className={`p-6 rounded-[32px] max-w-[80%] text-sm leading-relaxed ${t.role === 'user' ? 'bg-white border border-gray-200 text-gray-700 rounded-tl-none shadow-sm' : 'bg-[#e04f39] text-white rounded-tr-none shadow-lg shadow-orange-100'}`}>
-                          {t.content}
+                        <div className={`p-6 rounded-[32px] max-w-[80%] text-sm leading-relaxed flex flex-col ${t.role === 'user' ? 'bg-white border border-gray-200 text-gray-700 rounded-tl-none shadow-sm' : 'bg-[#e04f39] text-white rounded-tr-none shadow-lg shadow-orange-100'}`}>
+                          <span className="mb-1">{t.content}</span>
+                          <span className={`text-[9px] font-bold tracking-widest mt-2 self-end ${t.role === 'user' ? 'text-gray-400' : 'text-orange-200'}`}>
+                            {new Date(t.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                          </span>
                         </div>
                       </div>
                     ))
