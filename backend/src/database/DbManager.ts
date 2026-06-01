@@ -128,6 +128,7 @@ export class DbManager {
         await this.pool.query('ALTER TABLE agents ADD COLUMN IF NOT EXISTS sip_user VARCHAR(50);');
         await this.pool.query('ALTER TABLE agents ADD COLUMN IF NOT EXISTS sip_password VARCHAR(100);');
         await this.pool.query('ALTER TABLE agents ADD COLUMN IF NOT EXISTS master_prompt TEXT;');
+        await this.pool.query('ALTER TABLE agents ADD COLUMN IF NOT EXISTS department VARCHAR(255);');
         
         // Fase 4: Telemetría de Costos
         await this.pool.query('ALTER TABLE calls ADD COLUMN IF NOT EXISTS stt_cost DECIMAL(10, 6) DEFAULT 0;');
@@ -499,11 +500,12 @@ export class DbManager {
   public async addAgent(agent: any): Promise<void> {
     try {
       await this.pool.query(
-        `INSERT INTO agents (phone_number, name, ai_model, groq_api_key, fishaudio_api_key, voice_reference_id, sip_domain, sip_user, sip_password)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        `INSERT INTO agents (phone_number, name, department, ai_model, groq_api_key, fishaudio_api_key, voice_reference_id, sip_domain, sip_user, sip_password)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [
           agent.phone_number,
           agent.name,
+          agent.department || '',
           agent.ai_model || 'llama-3.3-70b-versatile',
           agent.groq_api_key,
           agent.fishaudio_api_key,
@@ -523,11 +525,12 @@ export class DbManager {
     try {
       await this.pool.query(
         `UPDATE agents 
-         SET phone_number = $1, name = $2, ai_model = $3, groq_api_key = $4, fishaudio_api_key = $5, voice_reference_id = $6, sip_domain = $7, sip_user = $8, sip_password = $9
-         WHERE id = $10`,
+         SET phone_number = $1, name = $2, department = $3, ai_model = $4, groq_api_key = $5, fishaudio_api_key = $6, voice_reference_id = $7, sip_domain = $8, sip_user = $9, sip_password = $10
+         WHERE id = $11`,
         [
           agent.phone_number,
           agent.name,
+          agent.department || '',
           agent.ai_model,
           agent.groq_api_key,
           agent.fishaudio_api_key,
