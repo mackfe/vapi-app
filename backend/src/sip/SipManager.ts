@@ -135,6 +135,10 @@ export class SipManager {
       this.handleInvite(request);
     } else if (request.method === 'BYE') {
       this.handleBye(request);
+    } else if (request.method === 'CANCEL') {
+      console.log('[SIP] Llamada cancelada por el llamante.');
+      this.sipStack.send(this.sipStack.makeResponse(request, 200, 'OK'));
+      this.handleBye(request);
     } else if (request.method === 'OPTIONS') {
       console.log('[SIP] Respondiendo a OPTIONS (Keep-alive)');
       this.sipStack.send(this.sipStack.makeResponse(request, 200, 'OK'));
@@ -192,7 +196,6 @@ export class SipManager {
     response.headers['content-type'] = 'application/sdp';
     response.content = sdp;
 
-    this.sipStack.send(response);
     
     // Extraer Caller ID del encabezado From
     const callerUri = request.headers.from.uri;
@@ -233,6 +236,9 @@ export class SipManager {
       if (this.rtp) this.rtp.stop();
       return;
     }
+
+    // TODO CORRECTO: Ahora sí contestamos la llamada
+    this.sipStack.send(response);
 
     const docs = await this.db.getAgentDocuments(agent.id);
     const knowledgeContext = docs.map(d => d.extracted_content).join('\n\n');
