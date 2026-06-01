@@ -92,6 +92,7 @@ function App() {
   const [voiceGenderFilter, setVoiceGenderFilter] = useState<'all' | 'M' | 'F'>('all');
   const [newAgent, setNewAgent] = useState({
     name: '',
+    department: '',
     phone_number: '',
     ai_model: 'llama-3.3-70b-versatile',
     groq_api_key: '',
@@ -215,7 +216,7 @@ function App() {
       }
       setShowAgentModal(false);
       setEditingFullAgentId(null);
-      setNewAgent({ name: '', phone_number: '', ai_model: 'llama-3.3-70b-versatile', groq_api_key: '', fishaudio_api_key: '', voice_reference_id: FISH_VOICES[0].id, sip_domain: '', sip_user: '', sip_password: '' });
+      setNewAgent({ name: '', department: '', phone_number: '', ai_model: 'llama-3.3-70b-versatile', groq_api_key: '', fishaudio_api_key: '', voice_reference_id: FISH_VOICES[0].id, sip_domain: '', sip_user: '', sip_password: '' });
       fetchAgents();
     } catch (e) {
       console.error('Error saving agent');
@@ -916,7 +917,7 @@ function App() {
                     <button 
                       onClick={() => {
                         setEditingFullAgentId(null);
-                        setNewAgent({ name: '', phone_number: '', ai_model: 'llama-3.3-70b-versatile', groq_api_key: '', fishaudio_api_key: '', voice_reference_id: FISH_VOICES[0].id, sip_domain: '', sip_user: '', sip_password: '' });
+                        setNewAgent({ name: '', department: '', phone_number: '', ai_model: 'llama-3.3-70b-versatile', groq_api_key: '', fishaudio_api_key: '', voice_reference_id: FISH_VOICES[0].id, sip_domain: '', sip_user: '', sip_password: '' });
                         setShowAgentModal(true);
                       }} 
                       className="bg-[#e04f39] text-white px-8 py-4 rounded-2xl font-black text-sm shadow-lg shadow-orange-100 hover:scale-105 transition-all"
@@ -939,7 +940,10 @@ function App() {
                       <tbody className="divide-y divide-gray-50">
                         {agents.map(agent => (
                           <tr key={agent.id} className="hover:bg-gray-50/50 transition-all">
-                            <td className="px-8 py-6 font-bold text-[#2d2d2d]">{agent.name}</td>
+                            <td className="px-8 py-6">
+                              <div className="font-bold text-[#2d2d2d]">{agent.name}</div>
+                              {agent.department && <div className="text-xs text-gray-400 mt-1">{agent.department}</div>}
+                            </td>
                             <td className="px-8 py-6 font-black text-[#e04f39] bg-orange-50/50 rounded-lg inline-block my-4 mx-8">{agent.phone_number}</td>
                             <td className="px-8 py-6 text-xs font-bold text-gray-500 bg-gray-50 rounded-lg inline-block my-4 mx-8 uppercase tracking-wider">{agent.ai_model}</td>
                             <td className="px-8 py-6 text-xs font-medium text-gray-400">
@@ -996,6 +1000,16 @@ function App() {
                                   className="w-full px-6 py-4 bg-gray-50 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#e04f39] outline-none font-medium text-sm transition-all"
                                   value={newAgent.name}
                                   onChange={(e) => setNewAgent({...newAgent, name: e.target.value})}
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 px-2">Departamento / Área</label>
+                                <input 
+                                  type="text" 
+                                  placeholder="Ej: Atención al Cliente"
+                                  className="w-full px-6 py-4 bg-gray-50 rounded-2xl border border-gray-200 focus:ring-2 focus:ring-[#e04f39] outline-none font-medium text-sm transition-all"
+                                  value={newAgent.department}
+                                  onChange={(e) => setNewAgent({...newAgent, department: e.target.value})}
                                 />
                               </div>
                               <div>

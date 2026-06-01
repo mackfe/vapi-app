@@ -341,7 +341,7 @@ export class SipManager {
 
     // Bienvenida
     setTimeout(async () => {
-      const welcome = "Hola, bienvenido a la línea de atención del Municipio de 3 de Febrero. ¿En qué puedo ayudarte?";
+      const welcome = `Hola, soy ${agent.name}${agent.department ? ` de ${agent.department}` : ''}. ¿En qué te puedo ayudar?`;
       if (this.io) this.io.emit('transcription', `IA: ${welcome}`);
       this.isAiSpeaking = true;
       
