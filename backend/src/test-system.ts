@@ -27,7 +27,7 @@ async function testSystem() {
     console.log('✅ Groq respondió:', response);
 
     console.log('\n2. Probando FishAudio (Voz)...');
-    const audioContent = await fish.textToSpeech(response);
+    const audioContent = await fish.textToSpeech(response.text);
     if (audioContent && audioContent.length > 0) {
       console.log(`✅ FishAudio generó un audio de ${audioContent.length} bytes.`);
       fs.writeFileSync('test-output.mp3', audioContent);

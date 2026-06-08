@@ -2,108 +2,149 @@ import dgram from 'dgram';
 import g711 from 'g711';
 const { ulawFromPCM, ulawToPCM } = g711;
 import { EventEmitter } from 'events';
+import { logger } from '../utils/logger.js';
+
+let nextPort = 17000;
+const PORT_RANGE_START = 17000;
+const PORT_RANGE_END = 17500;
+
+function allocatePort(): number {
+  const port = nextPort;
+  nextPort++;
+  if (nextPort > PORT_RANGE_END) nextPort = PORT_RANGE_START;
+  return port;
+}
 
 export class RtpManager extends EventEmitter {
-  private server: dgram.Socket;
+  private socket: dgram.Socket;
   private remotePort: number | null = null;
   private remoteAddress: string | null = null;
   private localPort: number;
+  private stopped: boolean = false;
 
-  constructor(port: number = 16384) {
+  private sendSeq: number = 0;
+  private sendTs: number = 0;
+  private ssrc: number;
+  private sendInterval: NodeJS.Timeout | null = null;
+
+  public _lastRtpInfo: { seq: number } | null = null;
+
+  constructor(port?: number) {
     super();
-    this.localPort = port;
-    this.server = dgram.createSocket('udp4');
+    this.localPort = port ?? allocatePort();
+    this.ssrc = Math.floor(Math.random() * 0xFFFFFFFF);
+    this.sendSeq = Math.floor(Math.random() * 65535);
+    this.sendTs = Math.floor(Math.random() * 4294967295);
+
+    this.socket = dgram.createSocket('udp4');
+    logger.debug('RtpManager creado', { localPort: this.localPort, ssrc: this.ssrc.toString(16) });
   }
 
-  public setRemote(address: string, port: number) {
+  public setRemote(address: string, port: number): void {
     this.remoteAddress = address;
     this.remotePort = port;
-    console.log(`[RTP] Destino remoto configurado manualmente: ${this.remoteAddress}:${this.remotePort}`);
+    logger.info('RTP destino configurado', { remoteAddress: address, remotePort: port });
   }
 
-  public async start() {
+  public async start(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      this.server.on('error', (err) => {
-        console.error(`[RTP] Error en socket: ${err.message}`);
-        reject(err);
+      this.socket.on('error', (err: Error) => {
+        logger.error('Error en socket RTP', { localPort: this.localPort, error: err.message });
+        if (!this.stopped) reject(err);
       });
 
-      this.server.on('message', (msg, rinfo) => {
+      this.socket.on('message', (msg: Buffer, rinfo: dgram.RemoteInfo) => {
+        if (this.stopped) return;
+
         if (!this.remoteAddress) {
           this.remoteAddress = rinfo.address;
           this.remotePort = rinfo.port;
-          console.log(`[RTP] Conectado a cliente remoto: ${this.remoteAddress}:${this.remotePort}`);
+          logger.info('RTP conectado a remoto', { address: rinfo.address, port: rinfo.port });
         }
 
-        // El paquete RTP tiene una cabecera de 12 bytes
+        if (msg.length < 12) return;
+
+        const seq = msg.readUInt16BE(2);
+        this._lastRtpInfo = { seq };
+
         const payload = msg.slice(12);
-        
-        // Decodificar G.711 u-law (PT 0) a PCM
         const pcm = Buffer.from(ulawToPCM(payload).buffer);
         this.emit('audio', pcm);
       });
 
-      this.server.bind(this.localPort, () => {
-        console.log(`[RTP] Servidor escuchando en puerto ${this.localPort}`);
+      this.socket.bind(this.localPort, () => {
+        logger.info('RTP escuchando', { port: this.localPort });
         resolve();
       });
     });
   }
 
-  public sendAudio(pcmBuffer: Buffer) {
-    if (!this.remoteAddress || !this.remotePort) return;
+  public sendAudio(pcmBuffer: Buffer, onComplete?: (active: boolean) => void): void {
+    if (!this.remoteAddress || !this.remotePort || this.stopped) {
+      if (onComplete) onComplete(false);
+      return;
+    }
 
-    // Codificar todo el PCM a G.711 u-law
     const encoded = Buffer.from(ulawFromPCM(new Int16Array(pcmBuffer.buffer)));
-    
-    // Configuración estándar de VoIP: 20ms por paquete (160 bytes a 8000Hz)
-    const PAYLOAD_SIZE = 160; 
+    const PAYLOAD_SIZE = 160;
     let offset = 0;
-    
-    // El protocolo RTP requiere secuencias y timestamps válidos
-    let sequenceNumber = Math.floor(Math.random() * 65535);
-    let timestamp = Math.floor(Math.random() * 4294967295);
-    const ssrc = 0x12345678;
 
-    // Enviar los paquetes de a poco (Streaming)
-    const interval = setInterval(() => {
-      if (offset >= encoded.length) {
-        clearInterval(interval);
+    if (this.sendInterval) {
+      clearInterval(this.sendInterval);
+      this.sendInterval = null;
+    }
+
+    this.sendInterval = setInterval(() => {
+      if (offset >= encoded.length || this.stopped) {
+        if (this.sendInterval) {
+          clearInterval(this.sendInterval);
+          this.sendInterval = null;
+        }
+        if (onComplete) onComplete(false);
         return;
       }
 
-      // Tomar un fragmento de 160 bytes
       const end = Math.min(offset + PAYLOAD_SIZE, encoded.length);
       const chunk = encoded.slice(offset, end);
-      
-      // Crear cabecera RTP de 12 bytes
+
       const rtpHeader = Buffer.alloc(12);
-      rtpHeader[0] = 0x80; // V=2
-      rtpHeader[1] = 0x00; // PT=0 (PCMU)
-      rtpHeader.writeUInt16BE(sequenceNumber, 2);
-      rtpHeader.writeUInt32BE(timestamp, 4);
-      rtpHeader.writeUInt32BE(ssrc, 8);
+      rtpHeader[0] = 0x80;
+      rtpHeader[1] = 0x00;
+      rtpHeader.writeUInt16BE(this.sendSeq, 2);
+      rtpHeader.writeUInt32BE(this.sendTs, 4);
+      rtpHeader.writeUInt32BE(this.ssrc, 8);
 
-      // Unir cabecera con el audio y enviar
       const packet = Buffer.concat([rtpHeader, chunk]);
-      this.server.send(packet, this.remotePort!, this.remoteAddress!);
+      this.socket.send(packet, this.remotePort!, this.remoteAddress!);
 
-      // Actualizar contadores para el siguiente paquete
       offset += PAYLOAD_SIZE;
-      sequenceNumber = (sequenceNumber + 1) % 65536;
-      timestamp += PAYLOAD_SIZE; 
+      this.sendSeq = (this.sendSeq + 1) % 65536;
+      this.sendTs += 160;
     }, 20);
   }
 
-  public getPort() {
+  public getPort(): number {
     return this.localPort;
   }
 
-  public stop() {
+  public isStopped(): boolean {
+    return this.stopped;
+  }
+
+  public stop(): void {
+    if (this.stopped) return;
+    this.stopped = true;
+
+    if (this.sendInterval) {
+      clearInterval(this.sendInterval);
+      this.sendInterval = null;
+    }
+
     try {
-      this.server.close();
-    } catch (e) {
-      // Ignorar si el socket ya estaba cerrado
+      this.socket.close();
+      logger.debug('RTP socket cerrado', { port: this.localPort });
+    } catch {
+      // socket ya estaba cerrado
     }
   }
 }

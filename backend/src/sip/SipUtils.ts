@@ -2,8 +2,11 @@ import crypto from 'crypto';
 
 export function createAuthHeader(method: string, uri: string, wwwAuthenticate: string, user: string, pass: string) {
   const parts = wwwAuthenticate.split(',').reduce((acc: any, part) => {
-    const [key, value] = part.trim().split('=');
-    acc[key.toLowerCase()] = value.replace(/"/g, '');
+    const eqIdx = part.indexOf('=');
+    if (eqIdx === -1) return acc;
+    const key = part.substring(0, eqIdx).trim().toLowerCase();
+    const value = part.substring(eqIdx + 1).trim().replace(/"/g, '');
+    acc[key] = value;
     return acc;
   }, {});
 

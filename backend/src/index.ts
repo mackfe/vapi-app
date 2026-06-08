@@ -13,29 +13,66 @@ import { TicketGenerator } from './ai/TicketGenerator.js';
 import multer from 'multer';
 import mammoth from 'mammoth';
 import Groq from 'groq-sdk';
-import pdf from 'pdf-parse-new';
+import * as pdfModule from 'pdf-parse-new';
+import crypto from 'crypto';
+import { logger } from './utils/logger.js';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const JWT_SECRET = process.env.JWT_SECRET || 'vox-ia-super-secret-2024';
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+const RATE_LIMIT_WINDOW_MS = 60_000;
 
-const upload = multer({ 
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+function rateLimit(maxRequests: number = 30) {
+  return (req: any, res: any, next: any) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const key = ip;
+    const now = Date.now();
+    const entry = rateLimitMap.get(key);
+
+    if (!entry || now > entry.resetAt) {
+      rateLimitMap.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+      return next();
+    }
+
+    if (entry.count >= maxRequests) {
+      return res.status(429).json({ error: 'Demasiadas solicitudes. Intente más tarde.' });
+    }
+
+    entry.count++;
+    return next();
+  };
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of rateLimitMap) {
+    if (now > entry.resetAt) rateLimitMap.delete(key);
+  }
+}, 60_000);
+
+const upload = multer({
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req: any, file: any, cb: any) => {
-    if (file.mimetype === 'application/pdf' || file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    if (
+      file.mimetype === 'application/pdf' ||
+      file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ) {
       cb(null, true);
     } else {
       cb(new Error('Formato no soportado. Sólo PDF o DOCX.'));
     }
-  }
+  },
 });
 
-// 1. Endpoint de Login Estático
-app.post('/api/login', (req: any, res: any) => {
+const LOGIN_EMAIL = process.env.LOGIN_EMAIL || 'admin@admin';
+const LOGIN_PASSWORD = process.env.LOGIN_PASSWORD || 'vox.ia1234';
+
+app.post('/api/login', rateLimit(5), (req: any, res: any) => {
   const { email, password } = req.body;
-  if (email === 'admin@admin' && password === 'vox.ia1234') {
+  if (email === LOGIN_EMAIL && password === LOGIN_PASSWORD) {
     const token = jwt.sign({ user: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
     res.json({ success: true, token });
   } else {
@@ -43,32 +80,67 @@ app.post('/api/login', (req: any, res: any) => {
   }
 });
 
-// 2. Escudo de Seguridad (Middleware)
 const verifyToken = (req: any, res: any, next: any) => {
-  if (req.path === '/login' || req.originalUrl === '/api/login' || req.path === '/test-ai') return next();
+  if (
+    req.path === '/login' ||
+    req.originalUrl === '/api/login' ||
+    req.path === '/health' ||
+    req.path === '/api/health'
+  )
+    return next();
+
   const token = req.headers['authorization'];
   if (!token) return res.status(403).json({ error: 'Token requerido' });
-  
+
   jwt.verify(token.replace('Bearer ', ''), JWT_SECRET, (err: any) => {
     if (err) return res.status(401).json({ error: 'Token inválido' });
     next();
   });
 };
 
-// 3. Proteger todo el router de la API
 app.use('/api', verifyToken);
+app.use('/api', rateLimit(60));
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: "*" }
+  cors: { origin: '*' },
+});
+
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+  if (!token) {
+    return next(new Error('Token requerido'));
+  }
+  try {
+    jwt.verify(token as string, JWT_SECRET);
+    next();
+  } catch {
+    next(new Error('Token inválido'));
+  }
 });
 
 const port = process.env.PORT || 5000;
 
-// Inicializar servicios
 const sip = new SipManager(io);
 
-// Rutas de API para el Historial
+app.get('/health', (_req: any, res: any) => {
+  res.json({
+    status: 'ok',
+    uptime: process.uptime(),
+    activeCalls: sip.getActiveCallCount(),
+    memory: process.memoryUsage(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get('/api/health', (_req: any, res: any) => {
+  res.json({
+    status: 'ok',
+    uptime: process.uptime(),
+    activeCalls: sip.getActiveCallCount(),
+  });
+});
+
 app.get('/api/calls', async (req, res) => {
   try {
     const calls = await sip.getDb().getCalls();
@@ -124,7 +196,6 @@ app.post('/api/admin/cleanup', async (req, res) => {
   }
 });
 
-// Rutas de Blacklist
 app.get('/api/blacklist', async (req, res) => {
   try {
     const list = await sip.getDb().getBlacklist();
@@ -154,7 +225,6 @@ app.delete('/api/blacklist/:id', async (req, res) => {
   }
 });
 
-// Rutas de Configuración Global
 app.get('/api/settings/security_mode', async (req, res) => {
   try {
     const mode = await sip.getDb().getSecurityMode();
@@ -177,7 +247,6 @@ app.post('/api/settings/security_mode', async (req, res) => {
   }
 });
 
-// Rutas de Agentes
 app.get('/api/agents', async (req, res) => {
   try {
     const list = await sip.getDb().getAgents();
@@ -214,10 +283,6 @@ app.delete('/api/agents/:id', async (req, res) => {
   }
 });
 
-io.on('connection', (socket) => {
-  console.log('[Dashboard] Cliente conectado');
-});
-
 app.put('/api/agents/:id/master-prompt', async (req, res) => {
   try {
     await sip.getDb().updateAgentMasterPrompt(parseInt(req.params.id), req.body.master_prompt);
@@ -239,15 +304,19 @@ app.get('/api/agents/:id/documents', async (req, res) => {
 app.post('/api/agents/:id/documents', upload.single('file'), async (req: any, res: any) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No se subió ningún archivo' });
-    
+
     const agentId = parseInt(req.params.id);
-    const agent = await sip.getDb().getAgents().then(agents => agents.find(a => a.id === agentId));
+    const agents = await sip.getDb().getAgents();
+    const agent = agents.find((a: any) => a.id === agentId);
     if (!agent) return res.status(404).json({ error: 'Agente no encontrado' });
-    if (!agent.groq_api_key) return res.status(400).json({ error: 'Debe configurar una API Key de Groq para este agente antes de subir documentos' });
+    if (!agent.groq_api_key)
+      return res
+        .status(400)
+        .json({ error: 'Debe configurar una API Key de Groq para este agente antes de subir documentos' });
 
     let rawText = '';
     if (req.file.mimetype === 'application/pdf') {
-      const pdfData = await pdf(req.file.buffer);
+      const pdfData = await ((pdfModule as any).default || pdfModule)(req.file.buffer);
       rawText = pdfData.text;
     } else {
       const docxData = await mammoth.extractRawText({ buffer: req.file.buffer });
@@ -262,13 +331,14 @@ app.post('/api/agents/:id/documents', upload.single('file'), async (req: any, re
     const chatCompletion = await groq.chat.completions.create({
       messages: [
         {
-          role: "system",
-          content: "Actúa como un estructurador de datos. Resume y organiza este texto de forma que un Agente Telefónico de IA pueda consumirlo fácil y rápidamente como base de conocimiento. Mantén todos los datos duros, horarios y reglas."
+          role: 'system',
+          content:
+            'Actúa como un estructurador de datos. Resume y organiza este texto de forma que un Agente Telefónico de IA pueda consumirlo fácil y rápidamente como base de conocimiento. Mantén todos los datos duros, horarios y reglas.',
         },
-        { role: "user", content: rawText }
+        { role: 'user', content: rawText },
       ],
-      model: "llama-3.3-70b-versatile",
-      temperature: 0.1
+      model: 'llama-3.3-70b-versatile',
+      temperature: 0.1,
     });
 
     const extractedContent = chatCompletion.choices[0]?.message?.content || rawText.substring(0, 500);
@@ -276,53 +346,79 @@ app.post('/api/agents/:id/documents', upload.single('file'), async (req: any, re
     await sip.getDb().addAgentDocument(agentId, req.file.originalname, extractedContent);
     res.json({ success: true, message: 'Documento procesado correctamente' });
   } catch (error: any) {
-    console.error('[Upload] Error procesando documento:', error);
+    logger.error('Error procesando documento', { error: error.message });
     res.status(500).json({ error: error.message || 'Error interno procesando documento' });
   }
 });
 
-
 app.post('/api/demo/fishaudio', async (req, res) => {
   try {
-    console.log('[FishAudio Demo Payload]', req.body);
     const { apiKey, referenceId, text } = req.body;
     if (!apiKey || !text) {
       return res.status(400).json({ error: 'Faltan parámetros' });
     }
     const client = new FishAudioClient(apiKey, referenceId);
     const audioBuffer = await client.generateDemoMp3(text);
-    
+
     res.set('Content-Type', 'audio/mpeg');
     res.send(audioBuffer);
   } catch (error: any) {
-    res.status(400).json({ error: 'Credenciales de FishAudio inválidas o ID incorrecto. Revisa tu API Key y Reference ID.' });
+    res.status(400).json({
+      error: 'Credenciales de FishAudio inválidas o ID incorrecto. Revisa tu API Key y Reference ID.',
+    });
   }
 });
 
-// Endpoint de prueba para verificar FishAudio y Groq
-app.get('/test-ai', async (req: any, res: any) => {
-  try {
-    const text = "Hola, soy el asistente de inteligencia artificial. ¿Cómo puedo ayudarte hoy?";
-    const response = await ai.getAiResponse("Dime una breve bienvenida");
-    const audioBuffer = await tts.textToSpeech(response);
-    
-    res.set('Content-Type', 'audio/mpeg');
-    res.send(audioBuffer);
-  } catch (error) {
-    res.status(500).send(error);
-  }
+io.on('connection', (socket) => {
+  logger.info('Dashboard cliente conectado', { socketId: socket.id });
+  socket.on('disconnect', () => {
+    logger.debug('Dashboard cliente desconectado', { socketId: socket.id });
+  });
 });
 
 server.listen(port, () => {
-  console.log(`[Server] Corriendo en http://localhost:${port}`);
-  
-  // Iniciar stack SIP
+  logger.info('Servidor iniciado', { port, env: process.env.NODE_ENV || 'development' });
+
   sip.start().catch((err: any) => {
-    console.error('[SIP] Error crítico al iniciar:', err);
+    logger.error('Error crítico al iniciar SIP', { error: String(err) });
   });
 
-  // Limpieza automática cada 5 minutos
   setInterval(() => {
     sip.getDb().cleanupAbandonedCalls().catch(() => {});
   }, 5 * 60 * 1000);
+});
+
+let shuttingDown = false;
+
+async function gracefulShutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  logger.info('Recibida señal de shutdown', { signal });
+
+  setTimeout(() => {
+    logger.error('Shutdown forzado por timeout');
+    process.exit(1);
+  }, 15000);
+
+  try {
+    await sip.shutdown();
+    logger.info('SIP Manager detenido');
+  } catch (err) {
+    logger.error('Error deteniendo SIP', { error: String(err) });
+  }
+
+  server.close(() => {
+    logger.info('Servidor HTTP cerrado');
+    process.exit(0);
+  });
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught exception', { error: err.message, stack: err.stack });
+});
+process.on('unhandledRejection', (reason: any) => {
+  logger.error('Unhandled rejection', { error: String(reason) });
 });
